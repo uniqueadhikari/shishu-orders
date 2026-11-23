@@ -103,7 +103,7 @@ export async function saveStoreSettings(
     handleFirestoreError(error, OperationType.WRITE, 'settings/store');
   }
 
-  // Sync teamEmails across existing orders and active year counters so authorized partner immediately has full access
+  // Sync teamEmails across orders and active year counters so partner gets instant access
   if (user.email?.toLowerCase() === OWNER_EMAIL) {
     const teamEmails = Array.from(new Set([OWNER_EMAIL, ...normalizedPartners])).slice(0, 5);
     try {

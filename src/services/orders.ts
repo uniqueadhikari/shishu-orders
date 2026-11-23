@@ -15,7 +15,6 @@ import {
 import { OWNER_EMAIL, db } from '../firebase/config';
 import { OperationType, handleFirestoreError } from '../firebase/errors';
 import type { Order, OrderFormValues, OrderStatus, StoreSettings } from '../types/order';
-import { calculateOrderPayment } from '../utils/payment';
 import {
   type CompressedPhoto,
   compressImageToTarget,
@@ -29,13 +28,19 @@ function toDateSafe(value: unknown): Date {
   return new Date();
 }
 
+function normalizeAmountField(value: unknown): string | number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value === 'string') return value;
+  return '';
+}
+
 function mapDocToOrder(id: string, data: Record<string, unknown>): Order {
   return {
     id,
     orderNumber: String(data.orderNumber ?? ''),
     customerName: String(data.customerName ?? ''),
     phone: String(data.phone ?? ''),
-    platform: (data.platform as Order['platform']) ?? 'Instagram',
+    platform: (data.platform as Order['platform']) ?? '',
     socialContact: String(data.socialContact ?? ''),
     productName: String(data.productName ?? ''),
     photos: Array.isArray(data.photos) ? data.photos.map(String) : [],
@@ -43,13 +48,13 @@ function mapDocToOrder(id: string, data: Record<string, unknown>): Order {
     size: String(data.size ?? ''),
     color: String(data.color ?? ''),
     notes: String(data.notes ?? ''),
-    productAmount: Number(data.productAmount ?? 0),
-    deliveryCharge: Number(data.deliveryCharge ?? 0),
-    deliveryArea: (data.deliveryArea as Order['deliveryArea']) ?? 'Inside Valley',
-    paymentType: (data.paymentType as Order['paymentType']) ?? 'FULL_PAID',
-    totalAmount: Number(data.totalAmount ?? 0),
-    paidAmount: Number(data.paidAmount ?? 0),
-    remainingAmount: Number(data.remainingAmount ?? 0),
+    productAmount: normalizeAmountField(data.productAmount),
+    deliveryCharge: normalizeAmountField(data.deliveryCharge),
+    deliveryArea: (data.deliveryArea as Order['deliveryArea']) ?? '',
+    paymentType: (data.paymentType as Order['paymentType']) ?? '',
+    totalAmount: normalizeAmountField(data.totalAmount),
+    paidAmount: normalizeAmountField(data.paidAmount),
+    remainingAmount: normalizeAmountField(data.remainingAmount),
     status: (data.status as OrderStatus) ?? 'NEW',
     createdAt: toDateSafe(data.createdAt),
     updatedAt: toDateSafe(data.updatedAt),
@@ -59,27 +64,17 @@ function mapDocToOrder(id: string, data: Record<string, unknown>): Order {
 }
 
 export function validateOrderForm(values: OrderFormValues, totalPhotosCount: number): string | null {
-  if (!values.customerName.trim()) return 'Please enter customer name.';
   if (values.customerName.trim().length > 120) return 'Customer name must be 120 characters or fewer.';
-  if (!values.phone.trim() || values.phone.trim().length < 5) return 'Please enter a valid phone number.';
   if (values.phone.trim().length > 30) return 'Phone number must be 30 characters or fewer.';
-  if (!values.platform) return 'Please select a social platform.';
-  if (!values.socialContact.trim()) return 'Please enter social username or contact.';
-  if (values.socialContact.trim().length > 120) return 'Social contact must be 120 characters or fewer.';
-  if (!values.productName.trim()) return 'Please enter piece / product name.';
+  if (values.socialContact.trim().length > 120) return 'Contact/username must be 120 characters or fewer.';
   if (values.productName.trim().length > 160) return 'Product name must be 160 characters or fewer.';
-  if (totalPhotosCount < 1) return 'Please add at least one product photo.';
   if (totalPhotosCount > 3) return 'Maximum 3 product photos allowed per order.';
-  if (!values.size.trim()) return 'Please enter or select a size.';
-  if (!values.color.trim()) return 'Please enter a color.';
+  if (values.size.trim().length > 60) return 'Size must be 60 characters or fewer.';
+  if (values.color.trim().length > 60) return 'Color must be 60 characters or fewer.';
   if (values.notes.length > 1000) return 'Special notes must be 1000 characters or fewer.';
-  if (!Number.isFinite(values.productAmount) || values.productAmount <= 0) {
-    return 'Please enter a valid product amount.';
-  }
-  if (!values.deliveryArea || !Number.isFinite(values.deliveryCharge) || values.deliveryCharge < 0) {
-    return 'Please select a valid delivery option.';
-  }
-  if (!values.paymentType) return 'Please select a payment type.';
+  if (values.totalAmount.trim().length > 60) return 'Total amount must be 60 characters or fewer.';
+  if (values.paidAmount.trim().length > 60) return 'Paid amount must be 60 characters or fewer.';
+  if (values.remainingAmount.trim().length > 60) return 'Remaining amount must be 60 characters or fewer.';
   return null;
 }
 
@@ -146,25 +141,28 @@ export async function createOrder(
     throw new Error(validationError);
   }
 
-  const payment = calculateOrderPayment(
-    values.productAmount,
-    values.deliveryCharge,
-    values.paymentType
-  );
-
   const newOrderRef = doc(collection(db, 'orders'));
   const orderId = newOrderRef.id;
   const teamEmails = buildTeamEmails(settings, user.email);
 
-  onStage?.('Uploading photos...');
-  const prepared = await ensureCompressedPhotos(newPhotos);
-  const uploadedPhotos = await uploadPreparedOrderPhotos(orderId, prepared, user, teamEmails);
-  const photoUrls = uploadedPhotos.map((p) => p.url);
-  const photoPaths = uploadedPhotos.map((p) => p.path);
+  let photoUrls: string[] = [];
+  let photoPaths: string[] = [];
+
+  if (newPhotos.length > 0) {
+    onStage?.('Uploading photos...');
+    const prepared = await ensureCompressedPhotos(newPhotos);
+    const uploadedPhotos = await uploadPreparedOrderPhotos(orderId, prepared, user, teamEmails);
+    photoUrls = uploadedPhotos.map((p) => p.url);
+    photoPaths = uploadedPhotos.map((p) => p.path);
+  }
 
   onStage?.('Saving order...');
   const currentYear = new Date().getFullYear();
   const counterRef = doc(db, 'counters', String(currentYear));
+
+  const trimmedTotal = values.totalAmount.trim();
+  const trimmedPaid = values.paidAmount.trim();
+  const trimmedRemaining = values.remainingAmount.trim();
 
   try {
     let generatedOrderNumber = '';
@@ -196,7 +194,7 @@ export async function createOrder(
         orderNumber: generatedOrderNumber,
         customerName: values.customerName.trim(),
         phone: values.phone.trim(),
-        platform: values.platform,
+        platform: '',
         socialContact: values.socialContact.trim(),
         productName: values.productName.trim(),
         photos: photoUrls,
@@ -204,13 +202,13 @@ export async function createOrder(
         size: values.size.trim(),
         color: values.color.trim(),
         notes: values.notes.trim(),
-        productAmount: payment.productAmount,
-        deliveryCharge: payment.deliveryCharge,
-        deliveryArea: values.deliveryArea,
-        paymentType: values.paymentType,
-        totalAmount: payment.totalAmount,
-        paidAmount: payment.paidAmount,
-        remainingAmount: payment.remainingAmount,
+        productAmount: '',
+        deliveryCharge: '',
+        deliveryArea: '',
+        paymentType: '',
+        totalAmount: trimmedTotal,
+        paidAmount: trimmedPaid,
+        remainingAmount: trimmedRemaining,
         status: values.status || 'NEW',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -225,7 +223,7 @@ export async function createOrder(
       orderNumber: generatedOrderNumber,
       customerName: values.customerName.trim(),
       phone: values.phone.trim(),
-      platform: values.platform,
+      platform: '',
       socialContact: values.socialContact.trim(),
       productName: values.productName.trim(),
       photos: photoUrls,
@@ -233,13 +231,13 @@ export async function createOrder(
       size: values.size.trim(),
       color: values.color.trim(),
       notes: values.notes.trim(),
-      productAmount: payment.productAmount,
-      deliveryCharge: payment.deliveryCharge,
-      deliveryArea: values.deliveryArea,
-      paymentType: values.paymentType,
-      totalAmount: payment.totalAmount,
-      paidAmount: payment.paidAmount,
-      remainingAmount: payment.remainingAmount,
+      productAmount: '',
+      deliveryCharge: '',
+      deliveryArea: '',
+      paymentType: '',
+      totalAmount: trimmedTotal,
+      paidAmount: trimmedPaid,
+      remainingAmount: trimmedRemaining,
       status: values.status || 'NEW',
       createdAt: now,
       updatedAt: now,
@@ -247,7 +245,9 @@ export async function createOrder(
       teamEmails,
     };
   } catch (error) {
-    await deleteStoragePaths(photoPaths);
+    if (photoPaths.length > 0) {
+      await deleteStoragePaths(photoPaths);
+    }
     handleFirestoreError(error, OperationType.CREATE, `orders/${orderId}`);
   }
 }
@@ -267,12 +267,6 @@ export async function updateOrder(
   if (validationError) {
     throw new Error(validationError);
   }
-
-  const payment = calculateOrderPayment(
-    values.productAmount,
-    values.deliveryCharge,
-    values.paymentType
-  );
 
   let newlyUploaded: { url: string; path: string }[] = [];
   if (newPhotos.length > 0) {
@@ -295,7 +289,7 @@ export async function updateOrder(
     await updateDoc(orderRef, {
       customerName: values.customerName.trim(),
       phone: values.phone.trim(),
-      platform: values.platform,
+      platform: existingOrder.platform ?? '',
       socialContact: values.socialContact.trim(),
       productName: values.productName.trim(),
       photos: finalPhotos,
@@ -303,18 +297,20 @@ export async function updateOrder(
       size: values.size.trim(),
       color: values.color.trim(),
       notes: values.notes.trim(),
-      productAmount: payment.productAmount,
-      deliveryCharge: payment.deliveryCharge,
-      deliveryArea: values.deliveryArea,
-      paymentType: values.paymentType,
-      totalAmount: payment.totalAmount,
-      paidAmount: payment.paidAmount,
-      remainingAmount: payment.remainingAmount,
+      productAmount: existingOrder.productAmount ?? '',
+      deliveryCharge: existingOrder.deliveryCharge ?? '',
+      deliveryArea: existingOrder.deliveryArea ?? '',
+      paymentType: existingOrder.paymentType ?? '',
+      totalAmount: values.totalAmount.trim(),
+      paidAmount: values.paidAmount.trim(),
+      remainingAmount: values.remainingAmount.trim(),
       status: values.status,
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
-    await deleteStoragePaths(newlyUploaded.map((p) => p.path));
+    if (newlyUploaded.length > 0) {
+      await deleteStoragePaths(newlyUploaded.map((p) => p.path));
+    }
     handleFirestoreError(error, OperationType.UPDATE, `orders/${existingOrder.id}`);
   }
 
@@ -342,5 +338,7 @@ export async function deleteOrder(order: Order): Promise<void> {
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `orders/${order.id}`);
   }
-  await deleteStoragePaths(order.photoPaths);
+  if (order.photoPaths.length > 0) {
+    await deleteStoragePaths(order.photoPaths);
+  }
 }

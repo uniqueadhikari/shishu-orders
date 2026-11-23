@@ -1,8 +1,9 @@
-export type Platform = 'TikTok' | 'Instagram' | 'WhatsApp';
+export type Platform = '' | 'TikTok' | 'Instagram' | 'WhatsApp';
 
-export type DeliveryArea = 'Inside Valley' | 'Outside Valley' | 'Other';
+export type DeliveryArea = '' | 'Inside Valley' | 'Outside Valley' | 'Other';
 
 export type PaymentType =
+  | ''
   | 'FULL_PAID'
   | 'HALF_WITH_DELIVERY'
   | 'HALF_WITHOUT_DELIVERY'
@@ -32,13 +33,13 @@ export interface Order {
   size: string;
   color: string;
   notes: string;
-  productAmount: number;
-  deliveryCharge: number;
+  productAmount: string | number;
+  deliveryCharge: string | number;
   deliveryArea: DeliveryArea;
   paymentType: PaymentType;
-  totalAmount: number;
-  paidAmount: number;
-  remainingAmount: number;
+  totalAmount: string | number;
+  paidAmount: string | number;
+  remainingAmount: string | number;
   status: OrderStatus;
   createdAt: Date;
   updatedAt: Date;
@@ -49,16 +50,14 @@ export interface Order {
 export interface OrderFormValues {
   customerName: string;
   phone: string;
-  platform: Platform;
   socialContact: string;
   productName: string;
   size: string;
   color: string;
   notes: string;
-  productAmount: number;
-  deliveryArea: DeliveryArea;
-  deliveryCharge: number;
-  paymentType: PaymentType;
+  totalAmount: string;
+  paidAmount: string;
+  remainingAmount: string;
   status: OrderStatus;
 }
 
@@ -93,7 +92,6 @@ export type DateRangePreset =
 export interface OrderFilters {
   search: string;
   status: OrderStatus | 'ALL';
-  platform: Platform | 'ALL';
   paymentType: PaymentType | 'ALL';
   datePreset: DateRangePreset;
   customStart: string;

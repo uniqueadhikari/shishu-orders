@@ -12,17 +12,60 @@ function roundMoney(value: number): number {
 }
 
 /**
- * Exact Shishu.clo payment calculation rules:
- * - FULL_PAID: total = product + delivery; paid = total; remaining = 0
- * - HALF_WITH_DELIVERY: total = product + delivery; paid = product / 2 + delivery; remaining = total - paid
- * - HALF_WITHOUT_DELIVERY: total = product + delivery; paid = product / 2; remaining = total - paid
- * - FULL_COD: total = product + delivery; paid = 0; remaining = total
- * - DELIVERY_ONLY: total = product + delivery; paid = delivery; remaining = product
+ * Extracts a numeric value from either a number or a free-text amount string
+ * (e.g. "2500", "Rs. 2,500", "1500 cash") for KPI sums and charts.
+ */
+export function parseAmountNumber(value: string | number | null | undefined): number {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value >= 0 ? value : 0;
+  }
+  if (typeof value !== 'string') return 0;
+  const cleaned = value.replace(/,/g, '').trim();
+  if (!cleaned) return 0;
+  const match = cleaned.match(/-?\d+(\.\d+)?/);
+  if (!match) return 0;
+  const num = Number(match[0]);
+  return Number.isFinite(num) && num >= 0 ? num : 0;
+}
+
+/**
+ * Formats either numeric amounts or free-text amounts cleanly for display.
+ * - Blank / null / undefined -> "—"
+ * - Pure numeric text (e.g. "2500") or number -> "Rs. 2,500"
+ * - Custom text (e.g. "1500 cash", "Paid") -> returned verbatim
+ */
+export function formatAmountDisplay(
+  value: string | number | null | undefined,
+  currency = 'Rs.'
+): string {
+  if (value === null || value === undefined) return '—';
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? formatCurrency(value, currency) : '—';
+  }
+  const trimmed = value.trim();
+  if (!trimmed) return '—';
+  if (/^\d[\d,]*(\.\d+)?$/.test(trimmed)) {
+    const num = Number(trimmed.replace(/,/g, ''));
+    if (Number.isFinite(num)) {
+      return formatCurrency(num, currency);
+    }
+  }
+  return trimmed;
+}
+
+export function hasAmountValue(value: string | number | null | undefined): boolean {
+  if (typeof value === 'number') return Number.isFinite(value) && value !== 0;
+  if (typeof value === 'string') return value.trim().length > 0;
+  return false;
+}
+
+/**
+ * Legacy Shishu.clo payment calculation rules (retained for backwards compatibility).
  */
 export function calculateOrderPayment(
   rawProductAmount: number,
   rawDeliveryCharge: number,
-  paymentType: PaymentType
+  paymentType: Exclude<PaymentType, ''>
 ): PaymentCalculation {
   if (!Number.isFinite(rawProductAmount) || rawProductAmount < 0) {
     throw new Error('Please enter a valid product amount.');
@@ -90,10 +133,10 @@ export function formatCurrency(amount: number, currency = 'Rs.'): string {
   return `${currency} ${formatted}`;
 }
 
-export const PLATFORMS: Platform[] = ['Instagram', 'TikTok', 'WhatsApp'];
+export const PLATFORMS: Exclude<Platform, ''>[] = ['Instagram', 'TikTok', 'WhatsApp'];
 
 export const PAYMENT_TYPE_OPTIONS: {
-  value: PaymentType;
+  value: Exclude<PaymentType, ''>;
   label: string;
   shortLabel: string;
   description: string;
@@ -130,7 +173,8 @@ export const PAYMENT_TYPE_OPTIONS: {
   },
 ];
 
-export const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
+export const PAYMENT_TYPE_LABELS: Record<string, string> = {
+  '': 'Manual entry',
   FULL_PAID: 'Full paid',
   HALF_WITH_DELIVERY: 'Half + delivery charge',
   HALF_WITHOUT_DELIVERY: 'Half without delivery charge',
@@ -209,7 +253,7 @@ export const ORDER_STATUS_META: Record<
 };
 
 export function getDeliveryOptionsFromSettings(settings: StoreSettings): {
-  area: DeliveryArea;
+  area: Exclude<DeliveryArea, ''>;
   charge: number;
   label: string;
 }[] {

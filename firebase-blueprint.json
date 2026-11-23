@@ -2,7 +2,7 @@
   "entities": {
     "Order": {
       "title": "Order",
-      "description": "A customer clothing order for Shishu.clo",
+      "description": "A customer clothing order for Shishu.clo with optional fields and flexible text amounts",
       "type": "object",
       "properties": {
         "id": {
@@ -21,36 +21,36 @@
         },
         "customerName": {
           "type": "string",
-          "description": "Full name of the customer",
-          "minLength": 1,
+          "description": "Optional customer name",
+          "minLength": 0,
           "maxLength": 120
         },
         "phone": {
           "type": "string",
-          "description": "Customer phone number",
-          "minLength": 5,
+          "description": "Optional customer phone number",
+          "minLength": 0,
           "maxLength": 30
         },
         "platform": {
           "type": "string",
-          "description": "Social channel where the order originated",
-          "enum": ["TikTok", "Instagram", "WhatsApp"]
+          "description": "Optional legacy social channel identifier",
+          "enum": ["", "TikTok", "Instagram", "WhatsApp"]
         },
         "socialContact": {
           "type": "string",
-          "description": "Social handle or WhatsApp contact identifier",
-          "minLength": 1,
+          "description": "Optional contact or social handle",
+          "minLength": 0,
           "maxLength": 120
         },
         "productName": {
           "type": "string",
-          "description": "Clothing piece or product name",
-          "minLength": 1,
+          "description": "Optional clothing piece or product name",
+          "minLength": 0,
           "maxLength": 160
         },
         "photos": {
           "type": "array",
-          "description": "1 to 3 Firebase Storage download URLs or photo reference IDs"
+          "description": "0 to 3 Firebase Storage download URLs or fsphoto references"
         },
         "photoPaths": {
           "type": "array",
@@ -58,39 +58,42 @@
         },
         "size": {
           "type": "string",
-          "description": "Garment size",
-          "minLength": 1,
-          "maxLength": 40
+          "description": "Optional garment size entered as free text",
+          "minLength": 0,
+          "maxLength": 60
         },
         "color": {
           "type": "string",
-          "description": "Garment color",
-          "minLength": 1,
+          "description": "Optional garment color entered as free text",
+          "minLength": 0,
           "maxLength": 60
         },
         "notes": {
           "type": "string",
-          "description": "Special tailoring or delivery notes",
+          "description": "Optional special tailoring or delivery notes",
           "maxLength": 1000
         },
         "productAmount": {
-          "type": "number",
-          "description": "Base price of the product in NPR"
+          "type": "string",
+          "description": "Optional legacy product amount (string or number)",
+          "maxLength": 60
         },
         "deliveryCharge": {
-          "type": "number",
-          "description": "Delivery fee in NPR"
+          "type": "string",
+          "description": "Optional legacy delivery fee (string or number)",
+          "maxLength": 60
         },
         "deliveryArea": {
           "type": "string",
-          "description": "Selected delivery area label",
-          "minLength": 1,
+          "description": "Optional delivery area label",
+          "minLength": 0,
           "maxLength": 60
         },
         "paymentType": {
           "type": "string",
-          "description": "Payment structure rule",
+          "description": "Optional legacy payment structure rule",
           "enum": [
+            "",
             "FULL_PAID",
             "HALF_WITH_DELIVERY",
             "HALF_WITHOUT_DELIVERY",
@@ -99,16 +102,19 @@
           ]
         },
         "totalAmount": {
-          "type": "number",
-          "description": "Calculated total (productAmount + deliveryCharge)"
+          "type": "string",
+          "description": "Optional total amount entered as text (or legacy number)",
+          "maxLength": 60
         },
         "paidAmount": {
-          "type": "number",
-          "description": "Calculated amount already paid"
+          "type": "string",
+          "description": "Optional paid amount entered as text (or legacy number)",
+          "maxLength": 60
         },
         "remainingAmount": {
-          "type": "number",
-          "description": "Calculated balance due on delivery"
+          "type": "string",
+          "description": "Optional remaining amount entered as text (or legacy number)",
+          "maxLength": 60
         },
         "status": {
           "type": "string",

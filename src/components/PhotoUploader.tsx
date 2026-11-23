@@ -71,7 +71,7 @@ export function PhotoUploader({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-[#5C5852]">
-          Reference Photos ({items.length}/{maxPhotos} required, min 1)
+          Reference Photos ({items.length}/{maxPhotos} optional)
         </span>
       </div>
 

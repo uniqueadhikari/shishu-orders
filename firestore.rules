@@ -50,30 +50,17 @@ service cloud.firestore {
         && (emails.size() == 0 || (emails[0] is string && emails[0].size() <= 120));
     }
 
-    function approxEqual(a, b) {
-      return (a - b) <= 0.01 && (a - b) >= -0.01;
+    function isValidAmountField(val) {
+      return (val is string && val.size() <= 60)
+        || (val is number && val >= 0);
     }
 
-    function isValidPaymentMath(data) {
-      return data.productAmount is number
-        && data.deliveryCharge is number
-        && data.totalAmount is number
-        && data.paidAmount is number
-        && data.remainingAmount is number
-        && data.productAmount >= 0
-        && data.deliveryCharge >= 0
-        && data.totalAmount >= 0
-        && data.paidAmount >= 0
-        && data.remainingAmount >= 0
-        && approxEqual(data.totalAmount, data.productAmount + data.deliveryCharge)
-        && approxEqual(data.paidAmount + data.remainingAmount, data.totalAmount)
-        && (
-          (data.paymentType == 'FULL_PAID' && approxEqual(data.paidAmount, data.totalAmount) && approxEqual(data.remainingAmount, 0)) ||
-          (data.paymentType == 'HALF_WITH_DELIVERY' && approxEqual(data.paidAmount, (data.productAmount / 2.0) + data.deliveryCharge)) ||
-          (data.paymentType == 'HALF_WITHOUT_DELIVERY' && approxEqual(data.paidAmount, data.productAmount / 2.0)) ||
-          (data.paymentType == 'FULL_COD' && approxEqual(data.paidAmount, 0) && approxEqual(data.remainingAmount, data.totalAmount)) ||
-          (data.paymentType == 'DELIVERY_ONLY' && approxEqual(data.paidAmount, data.deliveryCharge) && approxEqual(data.remainingAmount, data.productAmount))
-        );
+    function isValidBoundedStringList(items, maxItems, maxItemLen) {
+      return items is list
+        && items.size() <= maxItems
+        && (items.size() == 0 || (items[0] is string && items[0].size() <= maxItemLen))
+        && (items.size() <= 1 || (items[1] is string && items[1].size() <= maxItemLen))
+        && (items.size() <= 2 || (items[2] is string && items[2].size() <= maxItemLen));
     }
 
     function isValidOrder(data, orderId) {
@@ -93,20 +80,24 @@ service cloud.firestore {
         ])
         && data.id is string && data.id == orderId && isValidId(data.id)
         && data.orderNumber is string && data.orderNumber.size() >= 12 && data.orderNumber.size() <= 20 && data.orderNumber.matches('^SH-[0-9]{4}-[0-9]{4}$')
-        && data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 120
-        && data.phone is string && data.phone.size() >= 5 && data.phone.size() <= 30
-        && data.platform is string && data.platform in ['TikTok', 'Instagram', 'WhatsApp']
-        && data.socialContact is string && data.socialContact.size() >= 1 && data.socialContact.size() <= 120
-        && data.productName is string && data.productName.size() >= 1 && data.productName.size() <= 160
-        && data.photos is list && data.photos.size() >= 1 && data.photos.size() <= 3 && data.photos[0] is string && data.photos[0].size() >= 1 && data.photos[0].size() <= 2048
-        && data.photoPaths is list && data.photoPaths.size() >= 0 && data.photoPaths.size() <= 3 && (data.photoPaths.size() == 0 || (data.photoPaths[0] is string && data.photoPaths[0].size() <= 512))
-        && data.size is string && data.size.size() >= 1 && data.size.size() <= 40
-        && data.color is string && data.color.size() >= 1 && data.color.size() <= 60
+        && data.customerName is string && data.customerName.size() <= 120
+        && data.phone is string && data.phone.size() <= 30
+        && data.platform is string && data.platform in ['', 'TikTok', 'Instagram', 'WhatsApp']
+        && data.socialContact is string && data.socialContact.size() <= 120
+        && data.productName is string && data.productName.size() <= 160
+        && isValidBoundedStringList(data.photos, 3, 2048)
+        && isValidBoundedStringList(data.photoPaths, 3, 512)
+        && data.size is string && data.size.size() <= 60
+        && data.color is string && data.color.size() <= 60
         && data.notes is string && data.notes.size() <= 1000
-        && data.deliveryArea is string && data.deliveryArea.size() >= 1 && data.deliveryArea.size() <= 60
-        && data.paymentType is string && data.paymentType in ['FULL_PAID', 'HALF_WITH_DELIVERY', 'HALF_WITHOUT_DELIVERY', 'FULL_COD', 'DELIVERY_ONLY']
+        && data.deliveryArea is string && data.deliveryArea.size() <= 60
+        && data.paymentType is string && data.paymentType in ['', 'FULL_PAID', 'HALF_WITH_DELIVERY', 'HALF_WITHOUT_DELIVERY', 'FULL_COD', 'DELIVERY_ONLY']
+        && isValidAmountField(data.productAmount)
+        && isValidAmountField(data.deliveryCharge)
+        && isValidAmountField(data.totalAmount)
+        && isValidAmountField(data.paidAmount)
+        && isValidAmountField(data.remainingAmount)
         && data.status is string && data.status in ['NEW', 'CONFIRMED', 'PROCESSING', 'READY', 'SHIPPED', 'COMPLETED', 'CANCELLED', 'RETURNED']
-        && isValidPaymentMath(data)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
         && data.createdByUid is string && data.createdByUid.size() >= 1 && data.createdByUid.size() <= 128

@@ -1,6 +1,5 @@
 import type { Order } from '../types/order';
 import { formatDateTime } from './date';
-import { PAYMENT_TYPE_LABELS } from './payment';
 
 function escapeCsvCell(value: string | number): string {
   const str = String(value ?? '');
@@ -17,17 +16,13 @@ export function buildOrdersCsv(orders: Order[]): string {
     'Date',
     'Customer',
     'Phone',
-    'Platform',
-    'Username',
+    'Contact',
     'Product',
     'Size',
     'Color',
-    'Product amount',
-    'Delivery',
     'Total',
     'Paid',
     'Remaining',
-    'Payment type',
     'Status',
     'Notes',
   ];
@@ -37,17 +32,13 @@ export function buildOrdersCsv(orders: Order[]): string {
     formatDateTime(order.createdAt),
     order.customerName,
     order.phone,
-    order.platform,
     order.socialContact,
     order.productName,
     order.size,
     order.color,
-    order.productAmount,
-    order.deliveryCharge,
     order.totalAmount,
     order.paidAmount,
     order.remainingAmount,
-    PAYMENT_TYPE_LABELS[order.paymentType] || order.paymentType,
     order.status,
     order.notes,
   ]);

@@ -15,10 +15,13 @@ import { getUserFriendlyError } from '../firebase/errors';
 import { deleteOrder, updateOrderStatus } from '../services/orders';
 import type { Order, OrderStatus, StoreSettings } from '../types/order';
 import { formatDateTime } from '../utils/date';
-import { PAYMENT_TYPE_LABELS, formatCurrency } from '../utils/payment';
+import {
+  PAYMENT_TYPE_LABELS,
+  formatAmountDisplay,
+  hasAmountValue,
+} from '../utils/payment';
 import { ImageLightbox } from './ImageLightbox';
 import { OrderPhoto } from './OrderPhoto';
-import { PlatformIcon } from './PlatformIcon';
 import { StatusBadge } from './StatusBadge';
 
 interface OrderDetailModalProps {
@@ -86,22 +89,37 @@ export function OrderDetailModal({
 
   async function handleCopyDmSummary() {
     const brand = settings.brandName || 'Shishu.clo';
+    const pieceDetails = [
+      order.size ? `Size ${order.size}` : '',
+      order.color || '',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
     const lines = [
       `Thank you for ordering with ${brand}!`,
       `Order: ${order.orderNumber}`,
-      `Piece: ${order.productName} (Size ${order.size} · ${order.color})`,
-      `Delivery: ${order.deliveryArea} (${formatCurrency(order.deliveryCharge, settings.currency)})`,
-      `Total: ${formatCurrency(order.totalAmount, settings.currency)}`,
-      `Paid: ${formatCurrency(order.paidAmount, settings.currency)}`,
-      order.remainingAmount > 0
-        ? `Remaining (COD): ${formatCurrency(order.remainingAmount, settings.currency)}`
-        : 'Payment Status: Fully Paid',
+      order.productName
+        ? `Piece: ${order.productName}${pieceDetails ? ` (${pieceDetails})` : ''}`
+        : pieceDetails
+          ? `Details: ${pieceDetails}`
+          : '',
+      hasAmountValue(order.totalAmount)
+        ? `Total: ${formatAmountDisplay(order.totalAmount, settings.currency)}`
+        : '',
+      hasAmountValue(order.paidAmount)
+        ? `Paid: ${formatAmountDisplay(order.paidAmount, settings.currency)}`
+        : '',
+      hasAmountValue(order.remainingAmount)
+        ? `Remaining: ${formatAmountDisplay(order.remainingAmount, settings.currency)}`
+        : '',
       `Current Status: ${order.status}`,
-    ];
+    ].filter(Boolean);
+
     try {
       await navigator.clipboard.writeText(lines.join('\n'));
       setCopiedDm(true);
-      onNotify?.('DM confirmation message copied');
+      onNotify?.('Order summary copied');
       window.setTimeout(() => setCopiedDm(false), 1800);
     } catch {
       // ignore if clipboard blocked
@@ -118,6 +136,13 @@ export function OrderDetailModal({
       // ignore if clipboard blocked
     }
   }
+
+  const headerTags = [
+    order.size ? `Size ${order.size}` : '',
+    order.color || '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -270,14 +295,12 @@ export function OrderDetailModal({
               <div>
                 <p className="text-xs font-medium text-[#8C877E]">Piece / Product</p>
                 <h2 className="text-xl sm:text-2xl font-display font-semibold text-[#121211] mt-0.5">
-                  {order.productName}
+                  {order.productName || '—'}
                 </h2>
               </div>
-              <div className="text-right text-sm text-[#5C5852] shrink-0">
-                <span>Size {order.size}</span>
-                <span aria-hidden="true"> · </span>
-                <span>{order.color}</span>
-              </div>
+              {headerTags && (
+                <div className="text-right text-sm text-[#5C5852] shrink-0">{headerTags}</div>
+              )}
             </div>
 
             {order.photos.length > 0 && (
@@ -289,7 +312,7 @@ export function OrderDetailModal({
                 >
                   <OrderPhoto
                     src={order.photos[0]}
-                    alt={`${order.productName} primary reference`}
+                    alt={`${order.productName || order.orderNumber} primary reference`}
                     lazy={false}
                     className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-300"
                   />
@@ -310,7 +333,7 @@ export function OrderDetailModal({
                       >
                         <OrderPhoto
                           src={url}
-                          alt={`${order.productName} reference ${idx + 2}`}
+                          alt={`${order.productName || order.orderNumber} reference ${idx + 2}`}
                           lazy={false}
                           className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-200"
                         />
@@ -327,11 +350,11 @@ export function OrderDetailModal({
             <div className="pt-3 border-t border-[#ECE9E2] grid grid-cols-2 gap-4 text-sm">
               <div>
                 <p className="text-xs text-[#8C877E]">Size</p>
-                <p className="font-medium text-[#121211] mt-0.5">{order.size}</p>
+                <p className="font-medium text-[#121211] mt-0.5">{order.size || '—'}</p>
               </div>
               <div>
                 <p className="text-xs text-[#8C877E]">Color</p>
-                <p className="font-medium text-[#121211] mt-0.5">{order.color}</p>
+                <p className="font-medium text-[#121211] mt-0.5">{order.color || '—'}</p>
               </div>
             </div>
 
@@ -348,73 +371,88 @@ export function OrderDetailModal({
 
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white border border-[#E6E2D8] rounded-2xl p-5 sm:p-6 space-y-4">
-            <h3 className="text-sm font-semibold text-[#121211]">Customer & Source</h3>
+            <h3 className="text-sm font-semibold text-[#121211]">Customer Details</h3>
             <div className="space-y-3 text-sm">
               <div>
                 <p className="text-xs text-[#8C877E]">Customer Name</p>
-                <p className="font-medium text-[#121211] mt-0.5">{order.customerName}</p>
+                <p className="font-medium text-[#121211] mt-0.5">{order.customerName || '—'}</p>
               </div>
               <div>
                 <p className="text-xs text-[#8C877E]">Phone</p>
-                <a
-                  href={`tel:${order.phone}`}
-                  className="mt-0.5 inline-flex items-center gap-1.5 font-mono tabular-nums font-medium text-[#121211] hover:underline"
-                >
-                  <Phone className="w-3.5 h-3.5 text-[#8C877E]" />
-                  {order.phone}
-                </a>
+                {order.phone ? (
+                  <a
+                    href={`tel:${order.phone}`}
+                    className="mt-0.5 inline-flex items-center gap-1.5 font-mono tabular-nums font-medium text-[#121211] hover:underline"
+                  >
+                    <Phone className="w-3.5 h-3.5 text-[#8C877E]" />
+                    {order.phone}
+                  </a>
+                ) : (
+                  <p className="font-medium text-[#121211] mt-0.5">—</p>
+                )}
               </div>
               <div>
-                <p className="text-xs text-[#8C877E]">Social Source</p>
-                <p className="font-medium text-[#121211] mt-0.5 inline-flex items-center gap-1.5">
-                  <PlatformIcon platform={order.platform} className="w-3.5 h-3.5 text-[#5C5852]" />
-                  <span>
-                    {order.platform} · {order.socialContact}
-                  </span>
+                <p className="text-xs text-[#8C877E]">Contact / Username</p>
+                <p className="font-medium text-[#121211] mt-0.5">
+                  {order.socialContact || '—'}
                 </p>
               </div>
-              <div>
-                <p className="text-xs text-[#8C877E]">Delivery Area</p>
-                <p className="font-medium text-[#121211] mt-0.5">{order.deliveryArea}</p>
-              </div>
+              {order.deliveryArea && (
+                <div>
+                  <p className="text-xs text-[#8C877E]">Delivery Area</p>
+                  <p className="font-medium text-[#121211] mt-0.5">{order.deliveryArea}</p>
+                </div>
+              )}
             </div>
           </div>
 
           <div className="bg-white border border-[#E6E2D8] rounded-2xl p-5 sm:p-6 space-y-3">
             <h3 className="text-sm font-semibold text-[#121211]">Payment Breakdown</h3>
-            <p className="text-xs text-[#5C5852]">
-              {PAYMENT_TYPE_LABELS[order.paymentType]}
-            </p>
+            {order.paymentType && (
+              <p className="text-xs text-[#5C5852]">
+                {PAYMENT_TYPE_LABELS[order.paymentType] || order.paymentType}
+              </p>
+            )}
 
-            <div className="pt-2 space-y-2 text-sm">
-              <div className="flex justify-between text-[#5C5852]">
-                <span>Product price</span>
-                <span className="font-mono tabular-nums text-[#121211]">
-                  {formatCurrency(order.productAmount, settings.currency)}
-                </span>
-              </div>
-              <div className="flex justify-between text-[#5C5852]">
-                <span>Delivery ({order.deliveryArea})</span>
-                <span className="font-mono tabular-nums text-[#121211]">
-                  {formatCurrency(order.deliveryCharge, settings.currency)}
-                </span>
-              </div>
-              <div className="border-t border-dashed border-[#D8D3C8] pt-2.5 flex justify-between font-semibold text-[#121211]">
+            <div className="pt-1 space-y-2 text-sm">
+              {hasAmountValue(order.productAmount) && (
+                <div className="flex justify-between text-[#5C5852]">
+                  <span>Product price</span>
+                  <span className="font-mono tabular-nums text-[#121211]">
+                    {formatAmountDisplay(order.productAmount, settings.currency)}
+                  </span>
+                </div>
+              )}
+              {hasAmountValue(order.deliveryCharge) && (
+                <div className="flex justify-between text-[#5C5852]">
+                  <span>Delivery{order.deliveryArea ? ` (${order.deliveryArea})` : ''}</span>
+                  <span className="font-mono tabular-nums text-[#121211]">
+                    {formatAmountDisplay(order.deliveryCharge, settings.currency)}
+                  </span>
+                </div>
+              )}
+              <div
+                className={`${
+                  hasAmountValue(order.productAmount) || hasAmountValue(order.deliveryCharge)
+                    ? 'border-t border-dashed border-[#D8D3C8] pt-2.5'
+                    : ''
+                } flex justify-between font-semibold text-[#121211]`}
+              >
                 <span>Total</span>
                 <span className="font-mono tabular-nums">
-                  {formatCurrency(order.totalAmount, settings.currency)}
+                  {formatAmountDisplay(order.totalAmount, settings.currency)}
                 </span>
               </div>
               <div className="flex justify-between text-emerald-800 font-medium">
                 <span>Paid</span>
                 <span className="font-mono tabular-nums">
-                  {formatCurrency(order.paidAmount, settings.currency)}
+                  {formatAmountDisplay(order.paidAmount, settings.currency)}
                 </span>
               </div>
               <div className="flex justify-between text-amber-900 font-semibold">
                 <span>Remaining</span>
                 <span className="font-mono tabular-nums">
-                  {formatCurrency(order.remainingAmount, settings.currency)}
+                  {formatAmountDisplay(order.remainingAmount, settings.currency)}
                 </span>
               </div>
             </div>
@@ -434,9 +472,14 @@ export function OrderDetailModal({
               Delete {order.orderNumber}?
             </h3>
             <p className="text-sm text-[#5C5852] leading-relaxed">
-              This permanently removes the order for{' '}
-              <span className="font-medium text-[#121211]">{order.customerName}</span> and deletes
-              its reference photos.
+              This permanently removes the order
+              {order.customerName ? (
+                <>
+                  {' '}
+                  for <span className="font-medium text-[#121211]">{order.customerName}</span>
+                </>
+              ) : null}{' '}
+              and deletes its reference photos.
             </p>
             <div className="flex items-center justify-end gap-2.5 pt-2">
               <button
@@ -467,7 +510,7 @@ export function OrderDetailModal({
           initialIndex={lightboxIdx}
           onClose={() => setLightboxIdx(null)}
           onSelectIndex={setLightboxIdx}
-          title={`${order.orderNumber} · ${order.productName}`}
+          title={`${order.orderNumber}${order.productName ? ` · ${order.productName}` : ''}`}
         />
       )}
     </div>

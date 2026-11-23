@@ -4,9 +4,8 @@ import { getUserFriendlyError } from '../firebase/errors';
 import { updateOrderStatus } from '../services/orders';
 import type { Order, OrderStatus, StoreSettings } from '../types/order';
 import { formatShortDate, isTodayDate } from '../utils/date';
-import { formatCurrency } from '../utils/payment';
+import { formatAmountDisplay, formatCurrency, parseAmountNumber } from '../utils/payment';
 import { OrderPhoto } from './OrderPhoto';
-import { PlatformIcon } from './PlatformIcon';
 import { StatusBadge } from './StatusBadge';
 
 interface DashboardPageProps {
@@ -46,17 +45,21 @@ export function DashboardPage({
       const isCancelledOrReturned =
         order.status === 'CANCELLED' || order.status === 'RETURNED';
 
+      const orderTotal = parseAmountNumber(order.totalAmount);
+      const orderPaid = parseAmountNumber(order.paidAmount);
+      const orderRemaining = parseAmountNumber(order.remainingAmount);
+
       if (isTodayDate(order.createdAt) && order.status !== 'CANCELLED') {
         todaysOrders += 1;
         if (!isCancelledOrReturned) {
-          todaysSales += order.totalAmount;
+          todaysSales += orderTotal;
         }
       }
 
       if (!isCancelledOrReturned) {
-        totalCollected += order.paidAmount;
-        totalOutstanding += order.remainingAmount;
-        activeTotal += order.totalAmount;
+        totalCollected += orderPaid;
+        totalOutstanding += orderRemaining;
+        activeTotal += orderTotal;
       }
 
       if (order.status === 'PROCESSING') processingCount += 1;
@@ -189,7 +192,7 @@ export function DashboardPage({
         </div>
       )}
 
-      {/* 8 KPI Grid: Financial Summary + Interactive Fulfillment Pipeline */}
+      {/* 8 KPI Grid */}
       <section aria-label="Order metrics" className="space-y-4">
         {loading ? (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -240,7 +243,7 @@ export function DashboardPage({
                   <span className="text-amber-900 font-semibold">
                     {formatCurrency(metrics.totalOutstanding, settings.currency)}
                   </span>{' '}
-                  COD pending
+                  remaining
                 </p>
               </div>
             )}
@@ -315,62 +318,67 @@ export function DashboardPage({
           </div>
         ) : (
           <div className="divide-y divide-[#ECE9E2]">
-            {recentOrders.map((order) => (
-              <div
-                key={order.id}
-                onClick={() => onSelectOrder(order)}
-                className="px-4 sm:px-5 py-3.5 hover:bg-[#FAF9F5] transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer"
-              >
-                <div className="flex items-center gap-3.5 min-w-0">
-                  <div className="w-12 h-12 rounded-xl overflow-hidden border border-[#E6E2D8] bg-[#F7F5F0] shrink-0 flex items-center justify-center">
-                    <OrderPhoto
-                      src={order.photos[0]}
-                      alt={order.productName}
-                      className="w-full h-full object-cover"
-                      iconClassName="w-4 h-4 text-[#8C877E]"
+            {recentOrders.map((order) => {
+              const subtitleParts = [
+                order.productName || 'Untitled piece',
+                order.size ? `Size ${order.size}` : '',
+                order.color || '',
+              ].filter(Boolean);
+
+              return (
+                <div
+                  key={order.id}
+                  onClick={() => onSelectOrder(order)}
+                  className="px-4 sm:px-5 py-3.5 hover:bg-[#FAF9F5] transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer"
+                >
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div className="w-12 h-12 rounded-xl overflow-hidden border border-[#E6E2D8] bg-[#F7F5F0] shrink-0 flex items-center justify-center">
+                      <OrderPhoto
+                        src={order.photos[0]}
+                        alt={order.productName || order.orderNumber}
+                        className="w-full h-full object-cover"
+                        iconClassName="w-4 h-4 text-[#8C877E]"
+                      />
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs font-semibold text-[#121211] tabular-nums">
+                          {order.orderNumber}
+                        </span>
+                        <span className="text-xs text-[#8C877E]" aria-hidden="true">
+                          ·
+                        </span>
+                        <span className="text-sm font-medium text-[#121211] truncate">
+                          {order.customerName || 'Unnamed customer'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#5C5852] truncate mt-0.5">
+                        {subtitleParts.join(' · ')}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between sm:justify-end gap-4 pl-[62px] sm:pl-0 shrink-0">
+                    <div className="text-left sm:text-right">
+                      <p className="text-sm font-semibold font-mono tabular-nums text-[#121211]">
+                        {formatAmountDisplay(order.totalAmount, settings.currency)}
+                      </p>
+                      <p className="text-[11px] font-mono tabular-nums text-[#8C877E]">
+                        Paid {formatAmountDisplay(order.paidAmount, settings.currency)}
+                      </p>
+                    </div>
+
+                    <StatusBadge
+                      status={order.status}
+                      compact
+                      disabled={updatingId === order.id}
+                      onChange={(next) => handleQuickStatus(order.orderNumber, order.id, next)}
                     />
                   </div>
-
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-xs font-semibold text-[#121211] tabular-nums">
-                        {order.orderNumber}
-                      </span>
-                      <span className="text-xs text-[#8C877E]" aria-hidden="true">
-                        ·
-                      </span>
-                      <span className="text-sm font-medium text-[#121211] truncate">
-                        {order.customerName}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-xs text-[#5C5852] truncate mt-0.5">
-                      <PlatformIcon platform={order.platform} className="w-3 h-3 shrink-0 text-[#8C877E]" />
-                      <span className="truncate">
-                        {order.productName} · Size {order.size} · {order.color}
-                      </span>
-                    </div>
-                  </div>
                 </div>
-
-                <div className="flex items-center justify-between sm:justify-end gap-4 pl-[62px] sm:pl-0 shrink-0">
-                  <div className="text-left sm:text-right">
-                    <p className="text-sm font-semibold font-mono tabular-nums text-[#121211]">
-                      {formatCurrency(order.totalAmount, settings.currency)}
-                    </p>
-                    <p className="text-[11px] font-mono tabular-nums text-[#8C877E]">
-                      Paid {formatCurrency(order.paidAmount, settings.currency)}
-                    </p>
-                  </div>
-
-                  <StatusBadge
-                    status={order.status}
-                    compact
-                    disabled={updatingId === order.id}
-                    onChange={(next) => handleQuickStatus(order.orderNumber, order.id, next)}
-                  />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>

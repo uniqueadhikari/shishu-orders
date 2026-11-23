@@ -6,11 +6,9 @@ import { DATE_PRESET_LABELS, getDateRangeBounds } from '../utils/date';
 import {
   ORDER_STATUSES,
   ORDER_STATUS_META,
-  PAYMENT_TYPE_OPTIONS,
-  PLATFORMS,
   formatCurrency,
+  parseAmountNumber,
 } from '../utils/payment';
-import { PlatformIcon } from './PlatformIcon';
 
 interface ReportsPageProps {
   orders: Order[];
@@ -61,11 +59,15 @@ export function ReportsPage({ orders, settings, onNotify }: ReportsPageProps) {
         returnedOrders += 1;
         continue;
       }
-      totalSales += o.totalAmount;
-      totalCollected += o.paidAmount;
-      totalOutstanding += o.remainingAmount;
+      const orderTotal = parseAmountNumber(o.totalAmount);
+      const orderPaid = parseAmountNumber(o.paidAmount);
+      const orderRemaining = parseAmountNumber(o.remainingAmount);
+
+      totalSales += orderTotal;
+      totalCollected += orderPaid;
+      totalOutstanding += orderRemaining;
       if (o.status === 'COMPLETED') {
-        completedSales += o.totalAmount;
+        completedSales += orderTotal;
       }
     }
 
@@ -89,12 +91,13 @@ export function ReportsPage({ orders, settings, onNotify }: ReportsPageProps) {
         d.getDate()
       ).padStart(2, '0')}`;
       const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const orderTotal = parseAmountNumber(o.totalAmount);
       const prev = map.get(key);
       if (prev) {
-        prev.sales += o.totalAmount;
+        prev.sales += orderTotal;
         prev.count += 1;
       } else {
-        map.set(key, { key, label, sales: o.totalAmount, count: 1 });
+        map.set(key, { key, label, sales: orderTotal, count: 1 });
       }
     }
     return Array.from(map.values())
@@ -108,40 +111,13 @@ export function ReportsPage({ orders, settings, onNotify }: ReportsPageProps) {
     dailyTrend[dailyTrend.length - 1] ||
     null;
 
-  const platformBreakdown = useMemo(() => {
-    return PLATFORMS.map((platform) => {
-      const matching = scopedOrders.filter(
-        (o) => o.platform === platform && o.status !== 'CANCELLED' && o.status !== 'RETURNED'
-      );
-      const count = matching.length;
-      const sales = matching.reduce((acc, o) => acc + o.totalAmount, 0);
-      return { platform, count, sales };
-    });
-  }, [scopedOrders]);
-
-  const maxPlatformSales = Math.max(1, ...platformBreakdown.map((p) => p.sales));
-
-  const paymentBreakdown = useMemo(() => {
-    return PAYMENT_TYPE_OPTIONS.map((pt) => {
-      const matching = scopedOrders.filter(
-        (o) => o.paymentType === pt.value && o.status !== 'CANCELLED' && o.status !== 'RETURNED'
-      );
-      const count = matching.length;
-      const total = matching.reduce((acc, o) => acc + o.totalAmount, 0);
-      const collected = matching.reduce((acc, o) => acc + o.paidAmount, 0);
-      return { ...pt, count, total, collected };
-    });
-  }, [scopedOrders]);
-
-  const maxPaymentCount = Math.max(1, ...paymentBreakdown.map((p) => p.count));
-
   const statusBreakdown = useMemo(() => {
     return ORDER_STATUSES.map((status) => {
       const matching = scopedOrders.filter((o) => o.status === status);
       return {
         status,
         count: matching.length,
-        sales: matching.reduce((acc, o) => acc + o.totalAmount, 0),
+        sales: matching.reduce((acc, o) => acc + parseAmountNumber(o.totalAmount), 0),
         color: ORDER_STATUS_META[status].barColor,
       };
     });
@@ -153,13 +129,15 @@ export function ReportsPage({ orders, settings, onNotify }: ReportsPageProps) {
     const map = new Map<string, { name: string; count: number; sales: number }>();
     for (const o of scopedOrders) {
       if (o.status === 'CANCELLED' || o.status === 'RETURNED') continue;
-      const key = o.productName.trim().toLowerCase();
+      const displayName = o.productName.trim() || 'Untitled piece';
+      const key = displayName.toLowerCase();
+      const orderTotal = parseAmountNumber(o.totalAmount);
       const existing = map.get(key);
       if (existing) {
         existing.count += 1;
-        existing.sales += o.totalAmount;
+        existing.sales += orderTotal;
       } else {
-        map.set(key, { name: o.productName.trim(), count: 1, sales: o.totalAmount });
+        map.set(key, { name: displayName, count: 1, sales: orderTotal });
       }
     }
     return Array.from(map.values())
@@ -348,42 +326,6 @@ export function ReportsPage({ orders, settings, onNotify }: ReportsPageProps) {
 
       {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Platform Breakdown Chart */}
-        <section className="bg-white border border-[#E6E2D8] rounded-2xl p-5 sm:p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-[#121211]">Sales by Platform</h2>
-            <span className="text-xs text-[#8C877E]">Active orders</span>
-          </div>
-
-          <div className="space-y-4">
-            {platformBreakdown.map((item) => {
-              const widthPct = Math.round((item.sales / maxPlatformSales) * 100);
-              return (
-                <div key={item.platform} className="space-y-1.5">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="font-medium text-[#121211] inline-flex items-center gap-2">
-                      <PlatformIcon platform={item.platform} className="w-3.5 h-3.5 text-[#5C5852]" />
-                      <span>{item.platform}</span>
-                      <span className="text-xs font-normal text-[#8C877E] tabular-nums">
-                        ({item.count} {item.count === 1 ? 'order' : 'orders'})
-                      </span>
-                    </span>
-                    <span className="font-mono text-xs sm:text-sm font-semibold text-[#121211] tabular-nums">
-                      {formatCurrency(item.sales, settings.currency)}
-                    </span>
-                  </div>
-                  <div className="h-2.5 w-full rounded-full bg-[#EFECE5] overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-[#121211] transition-all duration-300"
-                      style={{ width: `${item.sales > 0 ? Math.max(4, widthPct) : 0}%` }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
         {/* Order Status Breakdown Chart */}
         <section className="bg-white border border-[#E6E2D8] rounded-2xl p-5 sm:p-6 space-y-4">
           <div className="flex items-center justify-between">
@@ -411,36 +353,6 @@ export function ReportsPage({ orders, settings, onNotify }: ReportsPageProps) {
                   <span className="col-span-2 text-right font-mono font-semibold text-[#121211] tabular-nums">
                     {item.count}
                   </span>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* Payment Type Breakdown */}
-        <section className="bg-white border border-[#E6E2D8] rounded-2xl p-5 sm:p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-[#121211]">Payment Type Breakdown</h2>
-            <span className="text-xs text-[#8C877E]">Count & collected</span>
-          </div>
-
-          <div className="space-y-3.5">
-            {paymentBreakdown.map((item) => {
-              const pct = Math.round((item.count / maxPaymentCount) * 100);
-              return (
-                <div key={item.value} className="space-y-1">
-                  <div className="flex items-center justify-between gap-2 text-xs sm:text-sm">
-                    <span className="font-medium text-[#121211] truncate">{item.label}</span>
-                    <span className="font-mono text-xs text-[#5C5852] tabular-nums shrink-0">
-                      {item.count} · {formatCurrency(item.collected, settings.currency)}
-                    </span>
-                  </div>
-                  <div className="h-2 rounded-full bg-[#EFECE5] overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-[#5C5852] transition-all duration-300"
-                      style={{ width: `${item.count > 0 ? Math.max(4, pct) : 0}%` }}
-                    />
-                  </div>
                 </div>
               );
             })}

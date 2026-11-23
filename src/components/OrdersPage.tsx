@@ -19,7 +19,6 @@ import type {
   OrderFilters,
   OrderStatus,
   PaymentType,
-  Platform,
   StoreSettings,
 } from '../types/order';
 import { downloadOrdersCsv } from '../utils/csv';
@@ -27,11 +26,9 @@ import { DATE_PRESET_LABELS, formatShortDate, getDateRangeBounds } from '../util
 import {
   ORDER_STATUSES,
   PAYMENT_TYPE_OPTIONS,
-  PLATFORMS,
-  formatCurrency,
+  formatAmountDisplay,
 } from '../utils/payment';
 import { OrderPhoto } from './OrderPhoto';
-import { PlatformIcon } from './PlatformIcon';
 import { StatusBadge } from './StatusBadge';
 
 interface OrdersPageProps {
@@ -49,7 +46,6 @@ const PAGE_SIZE = 20;
 const INITIAL_FILTERS: OrderFilters = {
   search: '',
   status: 'ALL',
-  platform: 'ALL',
   paymentType: 'ALL',
   datePreset: 'all',
   customStart: '',
@@ -125,7 +121,6 @@ export function OrdersPage({
 
     return orders.filter((order) => {
       if (filters.status !== 'ALL' && order.status !== filters.status) return false;
-      if (filters.platform !== 'ALL' && order.platform !== filters.platform) return false;
       if (filters.paymentType !== 'ALL' && order.paymentType !== filters.paymentType) return false;
       if (filters.size !== 'ALL' && order.size !== filters.size) return false;
       if (filters.color !== 'ALL' && order.color !== filters.color) return false;
@@ -140,7 +135,9 @@ export function OrdersPage({
           order.customerName.toLowerCase().includes(q) ||
           order.phone.toLowerCase().includes(q) ||
           order.socialContact.toLowerCase().includes(q) ||
-          order.productName.toLowerCase().includes(q);
+          order.productName.toLowerCase().includes(q) ||
+          order.size.toLowerCase().includes(q) ||
+          order.color.toLowerCase().includes(q);
         if (!hit) return false;
       }
 
@@ -157,7 +154,6 @@ export function OrdersPage({
 
   const activeFilterCount = useMemo(() => {
     let count = 0;
-    if (filters.platform !== 'ALL') count++;
     if (filters.paymentType !== 'ALL') count++;
     if (filters.datePreset !== 'all') count++;
     if (filters.size !== 'ALL') count++;
@@ -236,7 +232,11 @@ export function OrdersPage({
 
       {/* Quick Status Tabs */}
       {orders.length > 0 && (
-        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1" role="tablist" aria-label="Filter orders by status">
+        <div
+          className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1"
+          role="tablist"
+          aria-label="Filter orders by status"
+        >
           {(['ALL', ...ORDER_STATUSES] as const).map((st) => {
             const active = filters.status === st;
             const count = statusCounts[st] ?? 0;
@@ -279,7 +279,7 @@ export function OrdersPage({
               type="search"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search order #, customer, phone, username, or product..."
+              placeholder="Search order #, customer, phone, contact, product, size, or color..."
               className="w-full min-h-[44px] pl-10 pr-4 py-2 rounded-xl border border-[#DDD8CE] bg-[#FAF9F5] focus:bg-white focus:border-[#121211] focus:outline-none text-sm"
             />
           </div>
@@ -313,7 +313,7 @@ export function OrdersPage({
 
         {/* Expanded Filter Controls */}
         {showFilters && (
-          <div className="pt-3 border-t border-[#ECE9E2] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="pt-3 border-t border-[#ECE9E2] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div>
               <label className="block text-xs font-medium text-[#5C5852] mb-1">Status</label>
               <select
@@ -328,47 +328,6 @@ export function OrdersPage({
                 {ORDER_STATUSES.map((st) => (
                   <option key={st} value={st}>
                     {st}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-[#5C5852] mb-1">Platform</label>
-              <select
-                value={filters.platform}
-                onChange={(e) => {
-                  setFilters((f) => ({ ...f, platform: e.target.value as Platform | 'ALL' }));
-                  setPage(1);
-                }}
-                className="w-full min-h-[42px] px-3 py-2 rounded-xl border border-[#DDD8CE] bg-[#FAF9F5] text-sm"
-              >
-                <option value="ALL">All platforms</option>
-                {PLATFORMS.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-[#5C5852] mb-1">Payment type</label>
-              <select
-                value={filters.paymentType}
-                onChange={(e) => {
-                  setFilters((f) => ({
-                    ...f,
-                    paymentType: e.target.value as PaymentType | 'ALL',
-                  }));
-                  setPage(1);
-                }}
-                className="w-full min-h-[42px] px-3 py-2 rounded-xl border border-[#DDD8CE] bg-[#FAF9F5] text-sm"
-              >
-                <option value="ALL">All payment types</option>
-                {PAYMENT_TYPE_OPTIONS.map((pt) => (
-                  <option key={pt.value} value={pt.value}>
-                    {pt.label}
                   </option>
                 ))}
               </select>
@@ -432,6 +391,32 @@ export function OrdersPage({
                 ))}
               </select>
             </div>
+
+            {orders.some((o) => o.paymentType) && (
+              <div>
+                <label className="block text-xs font-medium text-[#5C5852] mb-1">
+                  Legacy payment type
+                </label>
+                <select
+                  value={filters.paymentType}
+                  onChange={(e) => {
+                    setFilters((f) => ({
+                      ...f,
+                      paymentType: e.target.value as PaymentType | 'ALL',
+                    }));
+                    setPage(1);
+                  }}
+                  className="w-full min-h-[42px] px-3 py-2 rounded-xl border border-[#DDD8CE] bg-[#FAF9F5] text-sm"
+                >
+                  <option value="ALL">All payment types</option>
+                  {PAYMENT_TYPE_OPTIONS.map((pt) => (
+                    <option key={pt.value} value={pt.value}>
+                      {pt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {filters.datePreset === 'custom' && (
               <>
@@ -521,7 +506,6 @@ export function OrdersPage({
                     <th className="py-3.5 px-4">Order #</th>
                     <th className="py-3.5 px-4">Customer</th>
                     <th className="py-3.5 px-4">Phone</th>
-                    <th className="py-3.5 px-4">Platform</th>
                     <th className="py-3.5 px-4">Product</th>
                     <th className="py-3.5 px-4">Size</th>
                     <th className="py-3.5 px-4">Color</th>
@@ -556,47 +540,41 @@ export function OrdersPage({
                           </button>
                         </div>
                       </td>
-                      <td className="py-3 px-4 font-medium text-[#121211] max-w-[160px] truncate">
-                        {order.customerName}
+                      <td className="py-3 px-4 font-medium text-[#121211] max-w-[170px] truncate">
+                        {order.customerName || '—'}
                       </td>
                       <td className="py-3 px-4 font-mono text-xs text-[#5C5852] whitespace-nowrap tabular-nums">
-                        {order.phone}
-                      </td>
-                      <td className="py-3 px-4 text-xs text-[#5C5852] whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1.5">
-                          <PlatformIcon platform={order.platform} className="w-3.5 h-3.5 text-[#8C877E]" />
-                          <span>{order.platform}</span>
-                        </span>
+                        {order.phone || '—'}
                       </td>
                       <td className="py-3 px-4">
-                        <div className="flex items-center gap-2.5 max-w-[200px]">
+                        <div className="flex items-center gap-2.5 max-w-[220px]">
                           <div className="w-9 h-9 rounded-lg overflow-hidden border border-[#E6E2D8] bg-[#F7F5F0] shrink-0 flex items-center justify-center">
                             <OrderPhoto
                               src={order.photos[0]}
-                              alt={order.productName}
+                              alt={order.productName || order.orderNumber}
                               className="w-full h-full object-cover"
                               iconClassName="w-3.5 h-3.5 text-[#8C877E]"
                             />
                           </div>
                           <span className="truncate font-medium text-[#121211]">
-                            {order.productName}
+                            {order.productName || '—'}
                           </span>
                         </div>
                       </td>
-                      <td className="py-3 px-4 text-xs text-[#5C5852] whitespace-nowrap">
-                        {order.size}
+                      <td className="py-3 px-4 text-xs text-[#5C5852] whitespace-nowrap max-w-[90px] truncate">
+                        {order.size || '—'}
                       </td>
                       <td className="py-3 px-4 text-xs text-[#5C5852] whitespace-nowrap max-w-[100px] truncate">
-                        {order.color}
+                        {order.color || '—'}
                       </td>
                       <td className="py-3 px-4 text-right font-mono text-xs font-semibold text-[#121211] whitespace-nowrap tabular-nums">
-                        {formatCurrency(order.totalAmount, settings.currency)}
+                        {formatAmountDisplay(order.totalAmount, settings.currency)}
                       </td>
                       <td className="py-3 px-4 text-right font-mono text-xs text-emerald-800 whitespace-nowrap tabular-nums">
-                        {formatCurrency(order.paidAmount, settings.currency)}
+                        {formatAmountDisplay(order.paidAmount, settings.currency)}
                       </td>
                       <td className="py-3 px-4 text-right font-mono text-xs text-amber-900 whitespace-nowrap tabular-nums">
-                        {formatCurrency(order.remainingAmount, settings.currency)}
+                        {formatAmountDisplay(order.remainingAmount, settings.currency)}
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap">
                         <StatusBadge
@@ -618,85 +596,94 @@ export function OrdersPage({
 
           {/* Mobile & Tablet Order Cards */}
           <div className="lg:hidden space-y-3">
-            {paginatedOrders.map((order) => (
-              <div
-                key={order.id}
-                onClick={() => onSelectOrder(order)}
-                className="bg-white border border-[#E6E2D8] rounded-2xl p-4 space-y-3 active:bg-[#FAF9F5] transition-colors cursor-pointer"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-semibold text-[#121211] tabular-nums">
-                        {order.orderNumber}
-                      </span>
-                      <span className="text-xs text-[#8C877E]" aria-hidden="true">
-                        ·
-                      </span>
-                      <span className="text-xs text-[#8C877E]">
-                        {formatShortDate(order.createdAt)}
-                      </span>
+            {paginatedOrders.map((order) => {
+              const specs = [
+                order.size ? `Size ${order.size}` : '',
+                order.color || '',
+                order.socialContact || '',
+              ]
+                .filter(Boolean)
+                .join(' · ');
+
+              return (
+                <div
+                  key={order.id}
+                  onClick={() => onSelectOrder(order)}
+                  className="bg-white border border-[#E6E2D8] rounded-2xl p-4 space-y-3 active:bg-[#FAF9F5] transition-colors cursor-pointer"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-semibold text-[#121211] tabular-nums">
+                          {order.orderNumber}
+                        </span>
+                        <span className="text-xs text-[#8C877E]" aria-hidden="true">
+                          ·
+                        </span>
+                        <span className="text-xs text-[#8C877E]">
+                          {formatShortDate(order.createdAt)}
+                        </span>
+                      </div>
+                      <h3 className="text-sm font-semibold text-[#121211] mt-0.5">
+                        {order.customerName || 'Unnamed customer'}
+                      </h3>
                     </div>
-                    <h3 className="text-sm font-semibold text-[#121211] mt-0.5">
-                      {order.customerName}
-                    </h3>
-                  </div>
 
-                  <StatusBadge
-                    status={order.status}
-                    compact
-                    disabled={updatingId === order.id}
-                    onChange={(next) => handleQuickStatus(order.orderNumber, order.id, next)}
-                  />
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <div className="w-14 h-14 rounded-xl overflow-hidden border border-[#E6E2D8] bg-[#F7F5F0] shrink-0 flex items-center justify-center">
-                    <OrderPhoto
-                      src={order.photos[0]}
-                      alt={order.productName}
-                      className="w-full h-full object-cover"
-                      iconClassName="w-4 h-4 text-[#8C877E]"
+                    <StatusBadge
+                      status={order.status}
+                      compact
+                      disabled={updatingId === order.id}
+                      onChange={(next) => handleQuickStatus(order.orderNumber, order.id, next)}
                     />
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-[#121211] truncate">
-                      {order.productName}
-                    </p>
-                    <p className="text-xs text-[#5C5852] truncate mt-0.5 flex items-center gap-1">
-                      <PlatformIcon platform={order.platform} className="w-3 h-3 shrink-0 text-[#8C877E]" />
-                      <span className="truncate">
-                        {order.platform} · Size {order.size} · {order.color}
-                      </span>
-                    </p>
-                    <p className="text-xs font-mono text-[#8C877E] tabular-nums mt-0.5">
-                      {order.phone}
-                    </p>
-                  </div>
-                </div>
 
-                <div className="pt-2.5 border-t border-[#ECE9E2] grid grid-cols-3 gap-2 text-xs">
-                  <div>
-                    <p className="text-[#8C877E]">Total</p>
-                    <p className="font-mono font-semibold text-[#121211] tabular-nums mt-0.5">
-                      {formatCurrency(order.totalAmount, settings.currency)}
-                    </p>
+                  <div className="flex items-center gap-3">
+                    <div className="w-14 h-14 rounded-xl overflow-hidden border border-[#E6E2D8] bg-[#F7F5F0] shrink-0 flex items-center justify-center">
+                      <OrderPhoto
+                        src={order.photos[0]}
+                        alt={order.productName || order.orderNumber}
+                        className="w-full h-full object-cover"
+                        iconClassName="w-4 h-4 text-[#8C877E]"
+                      />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-[#121211] truncate">
+                        {order.productName || 'Untitled piece'}
+                      </p>
+                      {specs && (
+                        <p className="text-xs text-[#5C5852] truncate mt-0.5">{specs}</p>
+                      )}
+                      {order.phone && (
+                        <p className="text-xs font-mono text-[#8C877E] tabular-nums mt-0.5">
+                          {order.phone}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-[#8C877E]">Paid</p>
-                    <p className="font-mono font-semibold text-emerald-800 tabular-nums mt-0.5">
-                      {formatCurrency(order.paidAmount, settings.currency)}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[#8C877E]">Remaining</p>
-                    <p className="font-mono font-semibold text-amber-900 tabular-nums mt-0.5">
-                      {formatCurrency(order.remainingAmount, settings.currency)}
-                    </p>
+
+                  <div className="pt-2.5 border-t border-[#ECE9E2] grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <p className="text-[#8C877E]">Total</p>
+                      <p className="font-mono font-semibold text-[#121211] tabular-nums mt-0.5 truncate">
+                        {formatAmountDisplay(order.totalAmount, settings.currency)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[#8C877E]">Paid</p>
+                      <p className="font-mono font-semibold text-emerald-800 tabular-nums mt-0.5 truncate">
+                        {formatAmountDisplay(order.paidAmount, settings.currency)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[#8C877E]">Remaining</p>
+                      <p className="font-mono font-semibold text-amber-900 tabular-nums mt-0.5 truncate">
+                        {formatAmountDisplay(order.remainingAmount, settings.currency)}
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Pagination */}
