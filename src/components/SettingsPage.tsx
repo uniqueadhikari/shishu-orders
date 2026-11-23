@@ -1,0 +1,267 @@
+import type { User } from 'firebase/auth';
+import { Check, Loader2, LogOut, ShieldCheck } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { OWNER_EMAIL } from '../firebase/config';
+import { getUserFriendlyError } from '../firebase/errors';
+import { saveStoreSettings } from '../services/settings';
+import type { Order, StoreSettings } from '../types/order';
+
+interface SettingsPageProps {
+  settings: StoreSettings;
+  orders: Order[];
+  user: User;
+  onSignOut: () => void;
+}
+
+export function SettingsPage({ settings, orders, user, onSignOut }: SettingsPageProps) {
+  const isOwner = user.email?.toLowerCase() === OWNER_EMAIL;
+
+  const [brandName, setBrandName] = useState(settings.brandName);
+  const [currency, setCurrency] = useState(settings.currency);
+  const [insideValleyRate, setInsideValleyRate] = useState(String(settings.insideValleyRate));
+  const [outsideValleyRate, setOutsideValleyRate] = useState(String(settings.outsideValleyRate));
+  const [otherRate, setOtherRate] = useState(String(settings.otherRate));
+  const [partnerEmail, setPartnerEmail] = useState(settings.partnerEmails[0] ?? '');
+
+  const [saving, setSaving] = useState(false);
+  const [savedBanner, setSavedBanner] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setBrandName(settings.brandName);
+    setCurrency(settings.currency);
+    setInsideValleyRate(String(settings.insideValleyRate));
+    setOutsideValleyRate(String(settings.outsideValleyRate));
+    setOtherRate(String(settings.otherRate));
+    setPartnerEmail(settings.partnerEmails[0] ?? '');
+  }, [settings]);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    if (!isOwner) return;
+
+    setError(null);
+    setSavedBanner(false);
+    setSaving(true);
+    try {
+      const partnerEmails = partnerEmail.trim() ? [partnerEmail.trim().toLowerCase()] : [];
+      await saveStoreSettings(
+        {
+          brandName,
+          currency,
+          insideValleyRate: Number(insideValleyRate),
+          outsideValleyRate: Number(outsideValleyRate),
+          otherRate: Number(otherRate),
+          partnerEmails,
+        },
+        user,
+        orders
+      );
+      setSavedBanner(true);
+    } catch (err) {
+      setError(getUserFriendlyError(err, 'Could not save settings.'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="max-w-3xl space-y-6">
+      <div>
+        <h1 className="text-2xl sm:text-3xl font-display font-semibold tracking-tight text-[#141413]">
+          Settings
+        </h1>
+        <p className="text-sm text-[#57534E] mt-0.5">
+          Store defaults, delivery charges, and private 2-person access
+        </p>
+      </div>
+
+      {error && (
+        <div className="rounded-xl bg-rose-50 border border-rose-200 px-4 py-3 text-sm font-medium text-rose-800">
+          {error}
+        </div>
+      )}
+
+      {savedBanner && (
+        <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm font-medium text-emerald-900 flex items-center gap-2">
+          <Check className="w-4 h-4 shrink-0" />
+          <span>Settings updated and synced.</span>
+        </div>
+      )}
+
+      <form onSubmit={handleSave} className="space-y-6">
+        {/* Brand & Currency */}
+        <section className="bg-white border border-[#E8E5DF] rounded-2xl p-5 sm:p-6 space-y-4">
+          <h2 className="text-sm font-semibold text-[#141413]">Brand & Currency</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="brandName" className="block text-xs font-medium text-[#57534E] mb-1.5">
+                Brand name
+              </label>
+              <input
+                id="brandName"
+                type="text"
+                disabled={!isOwner}
+                value={brandName}
+                onChange={(e) => setBrandName(e.target.value)}
+                className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-[#DFDBD2] bg-[#FAF9F7] disabled:opacity-60 text-sm"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="currency" className="block text-xs font-medium text-[#57534E] mb-1.5">
+                Currency symbol (NPR)
+              </label>
+              <input
+                id="currency"
+                type="text"
+                disabled={!isOwner}
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+                className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-[#DFDBD2] bg-[#FAF9F7] disabled:opacity-60 text-sm"
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* Delivery Charges */}
+        <section className="bg-white border border-[#E8E5DF] rounded-2xl p-5 sm:p-6 space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-[#141413]">Delivery Charges</h2>
+            <p className="text-xs text-[#78716C] mt-0.5">
+              Changes apply immediately to new orders without affecting past order totals.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label htmlFor="rateInside" className="block text-xs font-medium text-[#57534E] mb-1.5">
+                Inside Valley ({currency})
+              </label>
+              <input
+                id="rateInside"
+                type="number"
+                min="0"
+                step="any"
+                disabled={!isOwner}
+                value={insideValleyRate}
+                onChange={(e) => setInsideValleyRate(e.target.value)}
+                className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-[#DFDBD2] bg-[#FAF9F7] disabled:opacity-60 text-sm font-mono tabular-nums"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="rateOutside" className="block text-xs font-medium text-[#57534E] mb-1.5">
+                Outside Valley ({currency})
+              </label>
+              <input
+                id="rateOutside"
+                type="number"
+                min="0"
+                step="any"
+                disabled={!isOwner}
+                value={outsideValleyRate}
+                onChange={(e) => setOutsideValleyRate(e.target.value)}
+                className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-[#DFDBD2] bg-[#FAF9F7] disabled:opacity-60 text-sm font-mono tabular-nums"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="rateOther" className="block text-xs font-medium text-[#57534E] mb-1.5">
+                Other ({currency})
+              </label>
+              <input
+                id="rateOther"
+                type="number"
+                min="0"
+                step="any"
+                disabled={!isOwner}
+                value={otherRate}
+                onChange={(e) => setOtherRate(e.target.value)}
+                className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-[#DFDBD2] bg-[#FAF9F7] disabled:opacity-60 text-sm font-mono tabular-nums"
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* Private Two-User Access */}
+        <section className="bg-white border border-[#E8E5DF] rounded-2xl p-5 sm:p-6 space-y-4">
+          <div className="flex items-start gap-3">
+            <ShieldCheck className="w-5 h-5 text-[#141413] shrink-0 mt-0.5" />
+            <div>
+              <h2 className="text-sm font-semibold text-[#141413]">Private Team Access</h2>
+              <p className="text-xs text-[#57534E] mt-0.5">
+                Only these two Google accounts can sign in and access Shishu.clo orders and photos.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[#57534E] mb-1.5">
+                Primary Owner Account
+              </label>
+              <input
+                type="text"
+                readOnly
+                value={OWNER_EMAIL}
+                className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E8E5DF] bg-[#F5F3EE] text-sm text-[#57534E]"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="partnerEmail" className="block text-xs font-medium text-[#57534E] mb-1.5">
+                Partner Google Email
+              </label>
+              <input
+                id="partnerEmail"
+                type="email"
+                disabled={!isOwner}
+                value={partnerEmail}
+                onChange={(e) => setPartnerEmail(e.target.value)}
+                placeholder="partner@gmail.com"
+                className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-[#DFDBD2] bg-[#FAF9F7] disabled:opacity-60 text-sm"
+              />
+            </div>
+          </div>
+
+          {!isOwner && (
+            <p className="text-xs text-[#78716C]">
+              Only the primary owner ({OWNER_EMAIL}) can modify store rates or authorized partner email.
+            </p>
+          )}
+        </section>
+
+        {isOwner && (
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={saving}
+              className="min-h-[46px] px-6 py-2.5 rounded-xl bg-[#141413] text-white text-sm font-medium hover:bg-[#292826] disabled:opacity-60 transition-colors inline-flex items-center gap-2 cursor-pointer"
+            >
+              {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+              <span>{saving ? 'Saving Settings...' : 'Save Settings'}</span>
+            </button>
+          </div>
+        )}
+      </form>
+
+      {/* Account Session */}
+      <section className="bg-white border border-[#E8E5DF] rounded-2xl p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <p className="text-xs text-[#78716C]">Signed-in Google Account</p>
+          <p className="text-sm font-medium text-[#141413] mt-0.5">{user.email}</p>
+        </div>
+
+        <button
+          type="button"
+          onClick={onSignOut}
+          className="min-h-[42px] px-4 py-2 rounded-xl border border-[#DFDBD2] bg-white hover:bg-[#F5F3EE] text-sm font-medium text-[#141413] inline-flex items-center justify-center gap-2 cursor-pointer"
+        >
+          <LogOut className="w-4 h-4" />
+          <span>Sign Out</span>
+        </button>
+      </section>
+    </div>
+  );
+}

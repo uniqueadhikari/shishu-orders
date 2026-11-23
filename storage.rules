@@ -1,0 +1,29 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    function isAuthorizedUser() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && (
+          request.auth.token.email == 'girimerina469@gmail.com' ||
+          (
+            firestore.exists(/databases/ai-studio-15214836-de53-468a-bbf3-65d417104a2a/documents/settings/store) &&
+            request.auth.token.email in firestore.get(/databases/ai-studio-15214836-de53-468a-bbf3-65d417104a2a/documents/settings/store).data.partnerEmails
+          )
+        );
+    }
+
+    match /orders/{orderId}/{fileName} {
+      allow read: if isAuthorizedUser();
+      allow write: if isAuthorizedUser()
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if isAuthorizedUser();
+    }
+  }
+}

@@ -1,0 +1,281 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny everything not explicitly permitted
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Reusable Hardened Helpers ---
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true && request.auth.token.email is string;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerified() && request.auth.token.email == 'girimerina469@gmail.com';
+    }
+
+    function isAuthorizedPartnerOnSettings() {
+      return isVerified()
+        && exists(/databases/$(database)/documents/settings/store)
+        && request.auth.token.email in get(/databases/$(database)/documents/settings/store).data.partnerEmails;
+    }
+
+    function isTeamMember() {
+      return isBootstrappedAdmin() || isAuthorizedPartnerOnSettings();
+    }
+
+    function isValidEmailList(emails, minLen, maxLen) {
+      return emails is list
+        && emails.size() >= minLen
+        && emails.size() <= maxLen
+        && (emails.size() == 0 || (emails[0] is string && emails[0].size() <= 120));
+    }
+
+    function approxEqual(a, b) {
+      return (a - b) <= 0.01 && (a - b) >= -0.01;
+    }
+
+    function isValidPaymentMath(data) {
+      return data.productAmount is number
+        && data.deliveryCharge is number
+        && data.totalAmount is number
+        && data.paidAmount is number
+        && data.remainingAmount is number
+        && data.productAmount >= 0
+        && data.deliveryCharge >= 0
+        && data.totalAmount >= 0
+        && data.paidAmount >= 0
+        && data.remainingAmount >= 0
+        && approxEqual(data.totalAmount, data.productAmount + data.deliveryCharge)
+        && approxEqual(data.paidAmount + data.remainingAmount, data.totalAmount)
+        && (
+          (data.paymentType == 'FULL_PAID' && approxEqual(data.paidAmount, data.totalAmount) && approxEqual(data.remainingAmount, 0)) ||
+          (data.paymentType == 'HALF_WITH_DELIVERY' && approxEqual(data.paidAmount, (data.productAmount / 2.0) + data.deliveryCharge)) ||
+          (data.paymentType == 'HALF_WITHOUT_DELIVERY' && approxEqual(data.paidAmount, data.productAmount / 2.0)) ||
+          (data.paymentType == 'FULL_COD' && approxEqual(data.paidAmount, 0) && approxEqual(data.remainingAmount, data.totalAmount)) ||
+          (data.paymentType == 'DELIVERY_ONLY' && approxEqual(data.paidAmount, data.deliveryCharge) && approxEqual(data.remainingAmount, data.productAmount))
+        );
+    }
+
+    function isValidOrder(data, orderId) {
+      return data.keys().hasAll([
+          'id', 'orderNumber', 'customerName', 'phone', 'platform', 'socialContact',
+          'productName', 'photos', 'photoPaths', 'size', 'color', 'notes',
+          'productAmount', 'deliveryCharge', 'deliveryArea', 'paymentType',
+          'totalAmount', 'paidAmount', 'remainingAmount', 'status',
+          'createdAt', 'updatedAt', 'createdByUid', 'teamEmails'
+        ])
+        && data.keys().hasOnly([
+          'id', 'orderNumber', 'customerName', 'phone', 'platform', 'socialContact',
+          'productName', 'photos', 'photoPaths', 'size', 'color', 'notes',
+          'productAmount', 'deliveryCharge', 'deliveryArea', 'paymentType',
+          'totalAmount', 'paidAmount', 'remainingAmount', 'status',
+          'createdAt', 'updatedAt', 'createdByUid', 'teamEmails'
+        ])
+        && data.id is string && data.id == orderId && isValidId(data.id)
+        && data.orderNumber is string && data.orderNumber.size() >= 12 && data.orderNumber.size() <= 20 && data.orderNumber.matches('^SH-[0-9]{4}-[0-9]{4}$')
+        && data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 120
+        && data.phone is string && data.phone.size() >= 5 && data.phone.size() <= 30
+        && data.platform is string && data.platform in ['TikTok', 'Instagram', 'WhatsApp']
+        && data.socialContact is string && data.socialContact.size() >= 1 && data.socialContact.size() <= 120
+        && data.productName is string && data.productName.size() >= 1 && data.productName.size() <= 160
+        && data.photos is list && data.photos.size() >= 1 && data.photos.size() <= 3 && data.photos[0] is string && data.photos[0].size() >= 1 && data.photos[0].size() <= 2048
+        && data.photoPaths is list && data.photoPaths.size() >= 0 && data.photoPaths.size() <= 3 && (data.photoPaths.size() == 0 || (data.photoPaths[0] is string && data.photoPaths[0].size() <= 512))
+        && data.size is string && data.size.size() >= 1 && data.size.size() <= 40
+        && data.color is string && data.color.size() >= 1 && data.color.size() <= 60
+        && data.notes is string && data.notes.size() <= 1000
+        && data.deliveryArea is string && data.deliveryArea.size() >= 1 && data.deliveryArea.size() <= 60
+        && data.paymentType is string && data.paymentType in ['FULL_PAID', 'HALF_WITH_DELIVERY', 'HALF_WITHOUT_DELIVERY', 'FULL_COD', 'DELIVERY_ONLY']
+        && data.status is string && data.status in ['NEW', 'CONFIRMED', 'PROCESSING', 'READY', 'SHIPPED', 'COMPLETED', 'CANCELLED', 'RETURNED']
+        && isValidPaymentMath(data)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.createdByUid is string && data.createdByUid.size() >= 1 && data.createdByUid.size() <= 128
+        && isValidEmailList(data.teamEmails, 1, 5);
+    }
+
+    function isValidOrderPhoto(data, photoId) {
+      return data.keys().hasAll([
+          'id', 'orderId', 'dataUrl', 'mimeType', 'sizeBytes',
+          'createdAt', 'createdByUid', 'teamEmails'
+        ])
+        && data.keys().hasOnly([
+          'id', 'orderId', 'dataUrl', 'mimeType', 'sizeBytes',
+          'createdAt', 'createdByUid', 'teamEmails'
+        ])
+        && data.id is string && data.id == photoId && isValidId(data.id)
+        && data.orderId is string && isValidId(data.orderId)
+        && data.dataUrl is string && data.dataUrl.size() >= 20 && data.dataUrl.size() <= 360000
+        && data.dataUrl.matches('^data:image/(webp|jpeg|png);base64,[A-Za-z0-9+/=]+$')
+        && data.mimeType is string && data.mimeType in ['image/webp', 'image/jpeg', 'image/png']
+        && data.sizeBytes is number && data.sizeBytes > 0 && data.sizeBytes <= 260000
+        && data.createdAt is timestamp
+        && data.createdByUid is string && data.createdByUid.size() >= 1 && data.createdByUid.size() <= 128
+        && isValidEmailList(data.teamEmails, 1, 5);
+    }
+
+    function isValidCounter(data) {
+      return data.keys().hasAll(['year', 'lastSequence', 'updatedAt', 'teamEmails'])
+        && data.keys().hasOnly(['year', 'lastSequence', 'updatedAt', 'teamEmails'])
+        && data.year is number && data.year >= 2024 && data.year <= 2100
+        && data.lastSequence is number && data.lastSequence >= 1
+        && data.updatedAt is timestamp
+        && isValidEmailList(data.teamEmails, 1, 5);
+    }
+
+    function isValidSettings(data) {
+      return data.keys().hasAll([
+          'brandName', 'currency', 'insideValleyRate', 'outsideValleyRate',
+          'otherRate', 'partnerEmails', 'updatedAt', 'updatedByUid'
+        ])
+        && data.keys().hasOnly([
+          'brandName', 'currency', 'insideValleyRate', 'outsideValleyRate',
+          'otherRate', 'partnerEmails', 'updatedAt', 'updatedByUid'
+        ])
+        && data.brandName is string && data.brandName.size() >= 1 && data.brandName.size() <= 80
+        && data.currency is string && data.currency.size() >= 1 && data.currency.size() <= 16
+        && data.insideValleyRate is number && data.insideValleyRate >= 0
+        && data.outsideValleyRate is number && data.outsideValleyRate >= 0
+        && data.otherRate is number && data.otherRate >= 0
+        && isValidEmailList(data.partnerEmails, 0, 5)
+        && data.updatedAt is timestamp
+        && data.updatedByUid is string && data.updatedByUid == request.auth.uid && data.updatedByUid.size() <= 128;
+    }
+
+    // Connection check document (read-only ping)
+    match /test/connection {
+      allow get: if isVerified();
+    }
+
+    // Orders collection
+    match /orders/{orderId} {
+      allow get: if isValidId(orderId) && isVerified() && (
+        isBootstrappedAdmin() || (resource != null && request.auth.token.email in existing().teamEmails)
+      );
+      allow list: if isVerified() && (
+        isBootstrappedAdmin() || request.auth.token.email in resource.data.teamEmails
+      );
+      allow create: if isValidId(orderId)
+        && isVerified()
+        && isValidOrder(incoming(), orderId)
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && request.auth.token.email in incoming().teamEmails
+        && isTeamMember();
+      allow update: if isValidId(orderId)
+        && isVerified()
+        && isValidOrder(incoming(), orderId)
+        && incoming().id == existing().id
+        && incoming().orderNumber == existing().orderNumber
+        && incoming().createdAt == existing().createdAt
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().updatedAt == request.time
+        && (isBootstrappedAdmin() || request.auth.token.email in existing().teamEmails)
+        && (
+          // Action: Edit Order Details
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'customerName', 'phone', 'platform', 'socialContact', 'productName',
+            'photos', 'photoPaths', 'size', 'color', 'notes',
+            'productAmount', 'deliveryCharge', 'deliveryArea', 'paymentType',
+            'totalAmount', 'paidAmount', 'remainingAmount', 'status', 'updatedAt'
+          ]) ||
+          // Action: Quick Status Update
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) ||
+          // Action: Team Access Sync (Admin only)
+          (isBootstrappedAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['teamEmails', 'updatedAt']))
+        );
+      allow delete: if isValidId(orderId) && isVerified() && (
+        isBootstrappedAdmin() || request.auth.token.email in existing().teamEmails
+      );
+    }
+
+    // Isolated Order Photos collection (fallback when Firebase Storage bucket is unavailable)
+    match /orderPhotos/{photoId} {
+      allow get: if isValidId(photoId) && isVerified() && (
+        isBootstrappedAdmin() ||
+        isAuthorizedPartnerOnSettings() ||
+        (resource != null && request.auth.token.email in existing().teamEmails)
+      );
+      allow list: if isVerified() && (
+        isBootstrappedAdmin() || request.auth.token.email in resource.data.teamEmails
+      );
+      allow create: if isValidId(photoId)
+        && isVerified()
+        && isValidOrderPhoto(incoming(), photoId)
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && request.auth.token.email in incoming().teamEmails
+        && isTeamMember();
+      allow delete: if isValidId(photoId) && isVerified() && (
+        isBootstrappedAdmin() ||
+        isAuthorizedPartnerOnSettings() ||
+        (resource != null && request.auth.token.email in existing().teamEmails)
+      );
+    }
+
+    // Annual Order Number Counters
+    match /counters/{yearId} {
+      allow get: if isValidId(yearId) && isVerified() && (
+        isBootstrappedAdmin() || (resource != null && request.auth.token.email in existing().teamEmails)
+      );
+      allow create: if isValidId(yearId)
+        && isVerified()
+        && isValidCounter(incoming())
+        && incoming().lastSequence == 1
+        && incoming().updatedAt == request.time
+        && request.auth.token.email in incoming().teamEmails
+        && isTeamMember();
+      allow update: if isValidId(yearId)
+        && isVerified()
+        && isValidCounter(incoming())
+        && incoming().year == existing().year
+        && incoming().updatedAt == request.time
+        && (isBootstrappedAdmin() || request.auth.token.email in existing().teamEmails)
+        && (
+          (incoming().lastSequence == existing().lastSequence + 1 && incoming().diff(existing()).affectedKeys().hasOnly(['lastSequence', 'updatedAt'])) ||
+          (isBootstrappedAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['teamEmails', 'updatedAt']))
+        );
+    }
+
+    // Store Settings (settings/store)
+    match /settings/{settingId} {
+      allow get: if isValidId(settingId) && isVerified() && (
+        isBootstrappedAdmin() || (resource != null && request.auth.token.email in existing().partnerEmails)
+      );
+      allow create: if isValidId(settingId)
+        && settingId == 'store'
+        && isBootstrappedAdmin()
+        && isValidSettings(incoming())
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(settingId)
+        && settingId == 'store'
+        && isBootstrappedAdmin()
+        && isValidSettings(incoming())
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'brandName', 'currency', 'insideValleyRate', 'outsideValleyRate',
+          'otherRate', 'partnerEmails', 'updatedAt', 'updatedByUid'
+        ]);
+    }
+  }
+}

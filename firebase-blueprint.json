@@ -1,0 +1,336 @@
+{
+  "entities": {
+    "Order": {
+      "title": "Order",
+      "description": "A customer clothing order for Shishu.clo",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Document ID matching the Firestore order ID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "orderNumber": {
+          "type": "string",
+          "description": "Auto-generated sequential order number (e.g., SH-2026-0001)",
+          "minLength": 12,
+          "maxLength": 20,
+          "pattern": "^SH-[0-9]{4}-[0-9]{4}$"
+        },
+        "customerName": {
+          "type": "string",
+          "description": "Full name of the customer",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "phone": {
+          "type": "string",
+          "description": "Customer phone number",
+          "minLength": 5,
+          "maxLength": 30
+        },
+        "platform": {
+          "type": "string",
+          "description": "Social channel where the order originated",
+          "enum": ["TikTok", "Instagram", "WhatsApp"]
+        },
+        "socialContact": {
+          "type": "string",
+          "description": "Social handle or WhatsApp contact identifier",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "productName": {
+          "type": "string",
+          "description": "Clothing piece or product name",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "photos": {
+          "type": "array",
+          "description": "1 to 3 Firebase Storage download URLs or photo reference IDs"
+        },
+        "photoPaths": {
+          "type": "array",
+          "description": "Corresponding storage or orderPhotos reference paths for cleanup on delete"
+        },
+        "size": {
+          "type": "string",
+          "description": "Garment size",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "color": {
+          "type": "string",
+          "description": "Garment color",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "notes": {
+          "type": "string",
+          "description": "Special tailoring or delivery notes",
+          "maxLength": 1000
+        },
+        "productAmount": {
+          "type": "number",
+          "description": "Base price of the product in NPR"
+        },
+        "deliveryCharge": {
+          "type": "number",
+          "description": "Delivery fee in NPR"
+        },
+        "deliveryArea": {
+          "type": "string",
+          "description": "Selected delivery area label",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "paymentType": {
+          "type": "string",
+          "description": "Payment structure rule",
+          "enum": [
+            "FULL_PAID",
+            "HALF_WITH_DELIVERY",
+            "HALF_WITHOUT_DELIVERY",
+            "FULL_COD",
+            "DELIVERY_ONLY"
+          ]
+        },
+        "totalAmount": {
+          "type": "number",
+          "description": "Calculated total (productAmount + deliveryCharge)"
+        },
+        "paidAmount": {
+          "type": "number",
+          "description": "Calculated amount already paid"
+        },
+        "remainingAmount": {
+          "type": "number",
+          "description": "Calculated balance due on delivery"
+        },
+        "status": {
+          "type": "string",
+          "description": "Current fulfillment lifecycle status",
+          "enum": [
+            "NEW",
+            "CONFIRMED",
+            "PROCESSING",
+            "READY",
+            "SHIPPED",
+            "COMPLETED",
+            "CANCELLED",
+            "RETURNED"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when order was created"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when order was last updated"
+        },
+        "createdByUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the team member who created the order",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "teamEmails": {
+          "type": "array",
+          "description": "Authorized team emails permitted to view and manage this order"
+        }
+      },
+      "required": [
+        "id",
+        "orderNumber",
+        "customerName",
+        "phone",
+        "platform",
+        "socialContact",
+        "productName",
+        "photos",
+        "photoPaths",
+        "size",
+        "color",
+        "notes",
+        "productAmount",
+        "deliveryCharge",
+        "deliveryArea",
+        "paymentType",
+        "totalAmount",
+        "paidAmount",
+        "remainingAmount",
+        "status",
+        "createdAt",
+        "updatedAt",
+        "createdByUid",
+        "teamEmails"
+      ]
+    },
+    "OrderPhoto": {
+      "title": "OrderPhoto",
+      "description": "Compressed reference photo stored separately when Storage bucket is unavailable",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Photo document ID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "orderId": {
+          "type": "string",
+          "description": "Associated order document ID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dataUrl": {
+          "type": "string",
+          "description": "Compressed image data URI",
+          "minLength": 20,
+          "maxLength": 360000
+        },
+        "mimeType": {
+          "type": "string",
+          "description": "Image MIME type",
+          "enum": ["image/webp", "image/jpeg", "image/png"]
+        },
+        "sizeBytes": {
+          "type": "number",
+          "description": "Compressed byte size"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp"
+        },
+        "createdByUid": {
+          "type": "string",
+          "description": "Creator Firebase UID",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "teamEmails": {
+          "type": "array",
+          "description": "Authorized team emails"
+        }
+      },
+      "required": [
+        "id",
+        "orderId",
+        "dataUrl",
+        "mimeType",
+        "sizeBytes",
+        "createdAt",
+        "createdByUid",
+        "teamEmails"
+      ]
+    },
+    "OrderCounter": {
+      "title": "OrderCounter",
+      "description": "Annual atomic sequence counter for SH-YYYY-NNNN order numbers",
+      "type": "object",
+      "properties": {
+        "year": {
+          "type": "number",
+          "description": "Four-digit calendar year"
+        },
+        "lastSequence": {
+          "type": "number",
+          "description": "Last issued sequential order integer"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last increment"
+        },
+        "teamEmails": {
+          "type": "array",
+          "description": "Authorized team emails"
+        }
+      },
+      "required": ["year", "lastSequence", "updatedAt", "teamEmails"]
+    },
+    "StoreSettings": {
+      "title": "StoreSettings",
+      "description": "Store configuration including currency, delivery rates, and partner access",
+      "type": "object",
+      "properties": {
+        "brandName": {
+          "type": "string",
+          "description": "Brand display name",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "currency": {
+          "type": "string",
+          "description": "Currency display prefix",
+          "minLength": 1,
+          "maxLength": 16
+        },
+        "insideValleyRate": {
+          "type": "number",
+          "description": "Default delivery charge for Inside Valley"
+        },
+        "outsideValleyRate": {
+          "type": "number",
+          "description": "Default delivery charge for Outside Valley"
+        },
+        "otherRate": {
+          "type": "number",
+          "description": "Default delivery charge for Other areas"
+        },
+        "partnerEmails": {
+          "type": "array",
+          "description": "List of verified partner emails granted private access"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        },
+        "updatedByUid": {
+          "type": "string",
+          "description": "UID of team member who updated settings",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "brandName",
+        "currency",
+        "insideValleyRate",
+        "outsideValleyRate",
+        "otherRate",
+        "partnerEmails",
+        "updatedAt",
+        "updatedByUid"
+      ]
+    }
+  },
+  "firestore": {
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Primary collection storing all Shishu.clo customer orders"
+    },
+    "/orderPhotos/{photoId}": {
+      "schema": { "$ref": "#/entities/OrderPhoto" },
+      "description": "Isolated compressed photo store used when Firebase Storage bucket is unavailable"
+    },
+    "/counters/{yearId}": {
+      "schema": { "$ref": "#/entities/OrderCounter" },
+      "description": "Per-year sequential order numbering counters"
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/StoreSettings" },
+      "description": "Store configuration document (settings/store)"
+    }
+  }
+}

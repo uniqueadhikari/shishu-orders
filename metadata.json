@@ -1,0 +1,6 @@
+{
+  "name": "SHISHU.CLO — Order Manager",
+  "description": "Private order management system for Shishu.clo clothing brand with Firestore, Storage photos, automated NPR payment calculations, and reporting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
