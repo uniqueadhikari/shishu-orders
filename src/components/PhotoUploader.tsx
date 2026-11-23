@@ -70,7 +70,7 @@ export function PhotoUploader({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-[#57534E]">
+        <span className="text-xs font-medium text-[#5C5852]">
           Reference Photos ({items.length}/{maxPhotos} required, min 1)
         </span>
       </div>
@@ -80,7 +80,7 @@ export function PhotoUploader({
           {items.map((item, idx) => (
             <div
               key={item.id}
-              className="group relative aspect-square rounded-xl overflow-hidden border border-[#E8E5DF] bg-[#F5F3EE]"
+              className="group relative aspect-square rounded-xl overflow-hidden border border-[#E6E2D8] bg-[#F7F5F0]"
             >
               <OrderPhoto
                 src={item.previewUrl}
@@ -129,18 +129,18 @@ export function PhotoUploader({
           <button
             type="button"
             onClick={() => galleryInputRef.current?.click()}
-            className="min-h-[48px] px-4 py-3 rounded-xl border border-dashed border-[#CFCAC0] bg-[#FAF9F7] hover:bg-[#F3F0EA] text-sm font-medium text-[#141413] flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            className="min-h-[48px] px-4 py-3 rounded-xl border border-dashed border-[#C9C3B6] bg-[#FAF9F5] hover:bg-[#EFECE5] text-sm font-medium text-[#121211] flex items-center justify-center gap-2 transition-colors cursor-pointer"
           >
-            <ImagePlus className="w-4 h-4 text-[#57534E]" />
+            <ImagePlus className="w-4 h-4 text-[#5C5852]" />
             <span>{items.length === 0 ? 'Choose Photos' : 'Add Another Photo'}</span>
           </button>
 
           <button
             type="button"
             onClick={() => cameraInputRef.current?.click()}
-            className="min-h-[48px] px-4 py-3 rounded-xl border border-[#DFDBD2] bg-white hover:bg-[#F5F3EE] text-sm font-medium text-[#141413] flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            className="min-h-[48px] px-4 py-3 rounded-xl border border-[#DDD8CE] bg-white hover:bg-[#F7F5F0] text-sm font-medium text-[#121211] flex items-center justify-center gap-2 transition-colors cursor-pointer"
           >
-            <Camera className="w-4 h-4 text-[#57534E]" />
+            <Camera className="w-4 h-4 text-[#5C5852]" />
             <span>Take Photo</span>
           </button>
         </div>

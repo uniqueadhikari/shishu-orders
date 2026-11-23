@@ -23,6 +23,7 @@ import {
   getDeliveryOptionsFromSettings,
 } from '../utils/payment';
 import { type PhotoItem, PhotoUploader } from './PhotoUploader';
+import { PlatformIcon } from './PlatformIcon';
 
 interface OrderFormProps {
   mode: 'create' | 'edit';
@@ -246,7 +247,7 @@ export function OrderForm({
           user,
           setSaveStage
         );
-        onSuccess();
+        onSuccess(initialOrder);
       }
     } catch (err) {
       setError(getUserFriendlyError(err, 'Could not save order. Please check your details and try again.'));
@@ -257,28 +258,30 @@ export function OrderForm({
     }
   }
 
+  const selectedPaymentOption = PAYMENT_TYPE_OPTIONS.find((opt) => opt.value === paymentType);
+
   return (
-    <form onSubmit={handleSubmit} className="max-w-4xl mx-auto space-y-6 pb-20 sm:pb-6">
+    <form onSubmit={handleSubmit} className="max-w-4xl mx-auto space-y-6 pb-24 sm:pb-6">
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={onCancel}
-            className="min-h-[44px] min-w-[44px] rounded-xl border border-[#E8E5DF] bg-white hover:bg-[#F5F3EE] flex items-center justify-center transition-colors cursor-pointer"
+            className="min-h-[44px] min-w-[44px] rounded-xl border border-[#E6E2D8] bg-white hover:bg-[#F7F5F0] flex items-center justify-center transition-colors cursor-pointer"
             aria-label="Go back"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div>
-            <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-[#141413]">
+            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-[#8C877E]">
+              {mode === 'create'
+                ? 'Auto-numbered on save'
+                : 'Recalculates balances automatically'}
+            </p>
+            <h1 className="text-2xl sm:text-3xl font-display font-semibold tracking-tight text-[#121211]">
               {mode === 'create' ? 'New Order' : `Edit ${initialOrder?.orderNumber ?? 'Order'}`}
             </h1>
-            <p className="text-xs sm:text-sm text-[#78716C]">
-              {mode === 'create'
-                ? 'Order number is assigned automatically on save'
-                : 'Totals and balances recalculate automatically'}
-            </p>
           </div>
         </div>
       </div>
@@ -293,14 +296,14 @@ export function OrderForm({
       )}
 
       {/* 1. Customer & Social Source */}
-      <section className="bg-white border border-[#E8E5DF] rounded-2xl p-5 sm:p-6 space-y-5">
-        <h2 className="text-sm font-semibold text-[#141413] tracking-tight">
+      <section className="bg-white border border-[#E6E2D8] rounded-2xl p-5 sm:p-6 space-y-5">
+        <h2 className="text-sm font-semibold text-[#121211] tracking-tight">
           1. Customer & Social Source
         </h2>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label htmlFor="customerName" className="block text-xs font-medium text-[#57534E] mb-1.5">
+            <label htmlFor="customerName" className="block text-xs font-medium text-[#5C5852] mb-1.5">
               Customer name *
             </label>
             <input
@@ -311,12 +314,12 @@ export function OrderForm({
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
               placeholder="e.g. Ananya Shrestha"
-              className="w-full min-h-[46px] px-3.5 py-2.5 rounded-xl border border-[#DFDBD2] bg-[#FAF9F7] focus:bg-white focus:border-[#141413] focus:outline-none text-sm"
+              className="w-full min-h-[46px] px-3.5 py-2.5 rounded-xl border border-[#DDD8CE] bg-[#FAF9F5] focus:bg-white focus:border-[#121211] focus:outline-none text-sm"
             />
           </div>
 
           <div>
-            <label htmlFor="phone" className="block text-xs font-medium text-[#57534E] mb-1.5">
+            <label htmlFor="phone" className="block text-xs font-medium text-[#5C5852] mb-1.5">
               Phone number *
             </label>
             <input
@@ -327,14 +330,14 @@ export function OrderForm({
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               placeholder="e.g. 98XXXXXXXX"
-              className="w-full min-h-[46px] px-3.5 py-2.5 rounded-xl border border-[#DFDBD2] bg-[#FAF9F7] focus:bg-white focus:border-[#141413] focus:outline-none text-sm font-mono tabular-nums"
+              className="w-full min-h-[46px] px-3.5 py-2.5 rounded-xl border border-[#DDD8CE] bg-[#FAF9F5] focus:bg-white focus:border-[#121211] focus:outline-none text-sm font-mono tabular-nums"
             />
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <span className="block text-xs font-medium text-[#57534E] mb-1.5">
+            <span className="block text-xs font-medium text-[#5C5852] mb-1.5">
               Platform *
             </span>
             <div className="grid grid-cols-3 gap-2">
@@ -345,13 +348,14 @@ export function OrderForm({
                     key={p}
                     type="button"
                     onClick={() => setPlatform(p)}
-                    className={`min-h-[46px] px-3 py-2 rounded-xl border text-xs sm:text-sm font-medium transition-colors cursor-pointer ${
+                    className={`min-h-[46px] px-2.5 py-2 rounded-xl border text-xs sm:text-sm font-medium transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer ${
                       active
-                        ? 'bg-[#141413] text-white border-[#141413]'
-                        : 'bg-[#FAF9F7] text-[#141413] border-[#DFDBD2] hover:bg-[#F1EFEA]'
+                        ? 'bg-[#121211] text-[#F7F5F0] border-[#121211]'
+                        : 'bg-[#FAF9F5] text-[#121211] border-[#DDD8CE] hover:bg-[#EFECE5]'
                     }`}
                   >
-                    {p}
+                    <PlatformIcon platform={p} className="w-3.5 h-3.5 shrink-0" />
+                    <span>{p}</span>
                   </button>
                 );
               })}
@@ -359,7 +363,7 @@ export function OrderForm({
           </div>
 
           <div>
-            <label htmlFor="socialContact" className="block text-xs font-medium text-[#57534E] mb-1.5">
+            <label htmlFor="socialContact" className="block text-xs font-medium text-[#5C5852] mb-1.5">
               {platform === 'WhatsApp' ? 'WhatsApp name / number *' : `${platform} username *`}
             </label>
             <input
@@ -369,20 +373,20 @@ export function OrderForm({
               value={socialContact}
               onChange={(e) => setSocialContact(e.target.value)}
               placeholder={platform === 'WhatsApp' ? 'e.g. Ananya (98...)' : 'e.g. @ananya.s'}
-              className="w-full min-h-[46px] px-3.5 py-2.5 rounded-xl border border-[#DFDBD2] bg-[#FAF9F7] focus:bg-white focus:border-[#141413] focus:outline-none text-sm"
+              className="w-full min-h-[46px] px-3.5 py-2.5 rounded-xl border border-[#DDD8CE] bg-[#FAF9F5] focus:bg-white focus:border-[#121211] focus:outline-none text-sm"
             />
           </div>
         </div>
       </section>
 
       {/* 2. Piece Details & Reference Photos */}
-      <section className="bg-white border border-[#E8E5DF] rounded-2xl p-5 sm:p-6 space-y-5">
-        <h2 className="text-sm font-semibold text-[#141413] tracking-tight">
+      <section className="bg-white border border-[#E6E2D8] rounded-2xl p-5 sm:p-6 space-y-5">
+        <h2 className="text-sm font-semibold text-[#121211] tracking-tight">
           2. Piece Details & Reference Photos
         </h2>
 
         <div>
-          <label htmlFor="productName" className="block text-xs font-medium text-[#57534E] mb-1.5">
+          <label htmlFor="productName" className="block text-xs font-medium text-[#5C5852] mb-1.5">
             Piece / product name *
           </label>
           <input
@@ -392,7 +396,7 @@ export function OrderForm({
             value={productName}
             onChange={(e) => setProductName(e.target.value)}
             placeholder="e.g. Draped Linen Set / Corset Top"
-            className="w-full min-h-[46px] px-3.5 py-2.5 rounded-xl border border-[#DFDBD2] bg-[#FAF9F7] focus:bg-white focus:border-[#141413] focus:outline-none text-sm"
+            className="w-full min-h-[46px] px-3.5 py-2.5 rounded-xl border border-[#DDD8CE] bg-[#FAF9F5] focus:bg-white focus:border-[#121211] focus:outline-none text-sm"
           />
         </div>
 
@@ -405,7 +409,7 @@ export function OrderForm({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
           <div>
-            <label htmlFor="sizeInput" className="block text-xs font-medium text-[#57534E] mb-1.5">
+            <label htmlFor="sizeInput" className="block text-xs font-medium text-[#5C5852] mb-1.5">
               Size *
             </label>
             <div className="flex flex-wrap gap-1.5 mb-2">
@@ -416,8 +420,8 @@ export function OrderForm({
                   onClick={() => setSize(s)}
                   className={`min-h-[38px] px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
                     size === s
-                      ? 'bg-[#141413] text-white border-[#141413]'
-                      : 'bg-[#FAF9F7] text-[#141413] border-[#DFDBD2] hover:bg-[#F1EFEA]'
+                      ? 'bg-[#121211] text-[#F7F5F0] border-[#121211]'
+                      : 'bg-[#FAF9F5] text-[#121211] border-[#DDD8CE] hover:bg-[#EFECE5]'
                   }`}
                 >
                   {s}
@@ -431,12 +435,12 @@ export function OrderForm({
               value={size}
               onChange={(e) => setSize(e.target.value)}
               placeholder="Or type custom size (e.g. Bust 34)"
-              className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-[#DFDBD2] bg-[#FAF9F7] focus:bg-white focus:border-[#141413] focus:outline-none text-sm"
+              className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-[#DDD8CE] bg-[#FAF9F5] focus:bg-white focus:border-[#121211] focus:outline-none text-sm"
             />
           </div>
 
           <div>
-            <label htmlFor="colorInput" className="block text-xs font-medium text-[#57534E] mb-1.5">
+            <label htmlFor="colorInput" className="block text-xs font-medium text-[#5C5852] mb-1.5">
               Color *
             </label>
             <div className="flex flex-wrap gap-1.5 mb-2">
@@ -447,8 +451,8 @@ export function OrderForm({
                   onClick={() => setColor(c)}
                   className={`min-h-[38px] px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
                     color.toLowerCase() === c.toLowerCase()
-                      ? 'bg-[#141413] text-white border-[#141413]'
-                      : 'bg-[#FAF9F7] text-[#141413] border-[#DFDBD2] hover:bg-[#F1EFEA]'
+                      ? 'bg-[#121211] text-[#F7F5F0] border-[#121211]'
+                      : 'bg-[#FAF9F5] text-[#121211] border-[#DDD8CE] hover:bg-[#EFECE5]'
                   }`}
                 >
                   {c}
@@ -462,13 +466,13 @@ export function OrderForm({
               value={color}
               onChange={(e) => setColor(e.target.value)}
               placeholder="e.g. Sage Green, Charcoal"
-              className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-[#DFDBD2] bg-[#FAF9F7] focus:bg-white focus:border-[#141413] focus:outline-none text-sm"
+              className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-[#DDD8CE] bg-[#FAF9F5] focus:bg-white focus:border-[#121211] focus:outline-none text-sm"
             />
           </div>
         </div>
 
         <div>
-          <label htmlFor="notes" className="block text-xs font-medium text-[#57534E] mb-1.5">
+          <label htmlFor="notes" className="block text-xs font-medium text-[#5C5852] mb-1.5">
             Special notes (optional)
           </label>
           <textarea
@@ -477,20 +481,20 @@ export function OrderForm({
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Custom measurements, urgent delivery date, gift note..."
-            className="w-full px-3.5 py-2.5 rounded-xl border border-[#DFDBD2] bg-[#FAF9F7] focus:bg-white focus:border-[#141413] focus:outline-none text-sm resize-y"
+            className="w-full px-3.5 py-2.5 rounded-xl border border-[#DDD8CE] bg-[#FAF9F5] focus:bg-white focus:border-[#121211] focus:outline-none text-sm resize-y"
           />
         </div>
       </section>
 
       {/* 3. Pricing, Delivery & Payment */}
-      <section className="bg-white border border-[#E8E5DF] rounded-2xl p-5 sm:p-6 space-y-5">
-        <h2 className="text-sm font-semibold text-[#141413] tracking-tight">
+      <section className="bg-white border border-[#E6E2D8] rounded-2xl p-5 sm:p-6 space-y-5">
+        <h2 className="text-sm font-semibold text-[#121211] tracking-tight">
           3. Pricing, Delivery & Payment
         </h2>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label htmlFor="productAmount" className="block text-xs font-medium text-[#57534E] mb-1.5">
+            <label htmlFor="productAmount" className="block text-xs font-medium text-[#5C5852] mb-1.5">
               Product amount ({settings.currency}) *
             </label>
             <input
@@ -503,20 +507,20 @@ export function OrderForm({
               value={productAmountText}
               onChange={(e) => setProductAmountText(e.target.value)}
               placeholder="e.g. 2800"
-              className="w-full min-h-[48px] px-3.5 py-2.5 rounded-xl border border-[#DFDBD2] bg-[#FAF9F7] focus:bg-white focus:border-[#141413] focus:outline-none text-base font-mono tabular-nums font-medium"
+              className="w-full min-h-[48px] px-3.5 py-2.5 rounded-xl border border-[#DDD8CE] bg-[#FAF9F5] focus:bg-white focus:border-[#121211] focus:outline-none text-base font-mono tabular-nums font-medium"
             />
           </div>
 
           {mode === 'edit' && (
             <div>
-              <label htmlFor="orderStatus" className="block text-xs font-medium text-[#57534E] mb-1.5">
+              <label htmlFor="orderStatus" className="block text-xs font-medium text-[#5C5852] mb-1.5">
                 Order status
               </label>
               <select
                 id="orderStatus"
                 value={status}
                 onChange={(e) => setStatus(e.target.value as OrderStatus)}
-                className="w-full min-h-[48px] px-3.5 py-2.5 rounded-xl border border-[#DFDBD2] bg-[#FAF9F7] focus:bg-white focus:border-[#141413] focus:outline-none text-sm font-medium"
+                className="w-full min-h-[48px] px-3.5 py-2.5 rounded-xl border border-[#DDD8CE] bg-[#FAF9F5] focus:bg-white focus:border-[#121211] focus:outline-none text-sm font-medium"
               >
                 {ORDER_STATUSES.map((st) => (
                   <option key={st} value={st}>
@@ -530,7 +534,7 @@ export function OrderForm({
 
         {/* Delivery Area */}
         <div>
-          <span className="block text-xs font-medium text-[#57534E] mb-2">
+          <span className="block text-xs font-medium text-[#5C5852] mb-2">
             Delivery option *
           </span>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
@@ -541,17 +545,17 @@ export function OrderForm({
                   key={opt.area}
                   type="button"
                   onClick={() => handleSelectDelivery(opt.area, opt.charge)}
-                  className={`min-h-[52px] px-4 py-3 rounded-xl border text-left transition-colors flex items-center justify-between gap-2 cursor-pointer ${
+                  className={`min-h-[54px] px-4 py-3 rounded-xl border text-left transition-colors flex items-center justify-between gap-2 cursor-pointer ${
                     selected
-                      ? 'bg-[#141413] text-white border-[#141413]'
-                      : 'bg-[#FAF9F7] text-[#141413] border-[#DFDBD2] hover:bg-[#F1EFEA]'
+                      ? 'bg-[#121211] text-[#F7F5F0] border-[#121211]'
+                      : 'bg-[#FAF9F5] text-[#121211] border-[#DDD8CE] hover:bg-[#EFECE5]'
                   }`}
                 >
                   <div>
                     <p className="text-sm font-semibold font-mono tabular-nums">
                       {settings.currency} {opt.charge}
                     </p>
-                    <p className={`text-xs ${selected ? 'text-stone-300' : 'text-[#57534E]'}`}>
+                    <p className={`text-xs ${selected ? 'text-stone-300' : 'text-[#5C5852]'}`}>
                       {opt.area}
                     </p>
                   </div>
@@ -564,7 +568,7 @@ export function OrderForm({
             !deliveryOptions.some(
               (opt) => opt.area === deliveryArea && opt.charge === deliveryCharge
             ) && (
-              <p className="mt-2 text-xs text-[#57534E]">
+              <p className="mt-2 text-xs text-[#5C5852]">
                 Current saved rate: {settings.currency} {deliveryCharge} — {deliveryArea} (tap above to apply current settings rate).
               </p>
             )}
@@ -572,7 +576,7 @@ export function OrderForm({
 
         {/* Payment Type */}
         <div>
-          <span className="block text-xs font-medium text-[#57534E] mb-2">
+          <span className="block text-xs font-medium text-[#5C5852] mb-2">
             Payment type *
           </span>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
@@ -583,17 +587,17 @@ export function OrderForm({
                   key={opt.value}
                   type="button"
                   onClick={() => setPaymentType(opt.value)}
-                  className={`min-h-[56px] px-4 py-3 rounded-xl border text-left transition-colors cursor-pointer ${
+                  className={`min-h-[58px] px-4 py-3 rounded-xl border text-left transition-colors cursor-pointer ${
                     selected
-                      ? 'bg-[#141413] text-white border-[#141413]'
-                      : 'bg-[#FAF9F7] text-[#141413] border-[#DFDBD2] hover:bg-[#F1EFEA]'
+                      ? 'bg-[#121211] text-[#F7F5F0] border-[#121211]'
+                      : 'bg-[#FAF9F5] text-[#121211] border-[#DDD8CE] hover:bg-[#EFECE5]'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-medium">{opt.label}</span>
                     {selected && <Check className="w-4 h-4 shrink-0" />}
                   </div>
-                  <p className={`mt-0.5 text-xs ${selected ? 'text-stone-300' : 'text-[#78716C]'}`}>
+                  <p className={`mt-0.5 text-xs ${selected ? 'text-stone-300' : 'text-[#8C877E]'}`}>
                     {opt.description}
                   </p>
                 </button>
@@ -602,35 +606,52 @@ export function OrderForm({
           </div>
         </div>
 
-        {/* Live Payment Summary */}
-        <div className="rounded-xl bg-[#F8F7F4] border border-[#E8E5DF] p-4 sm:p-5 space-y-2.5">
-          <div className="flex items-center justify-between text-sm text-[#57534E]">
-            <span>Product amount</span>
-            <span className="font-mono tabular-nums font-medium text-[#141413]">
-              {formatCurrency(paymentSummary.productAmount, settings.currency)}
+        {/* Atelier Receipt Payment Summary */}
+        <div className="rounded-2xl bg-[#F7F5F0] border border-[#E6E2D8] p-5 space-y-3">
+          <div className="flex items-center justify-between gap-2 pb-2 border-b border-dashed border-[#D8D3C8]">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8C877E]">
+              Payment Summary
+            </span>
+            <span className="text-xs font-medium text-[#5C5852]">
+              {selectedPaymentOption?.shortLabel}
             </span>
           </div>
-          <div className="flex items-center justify-between text-sm text-[#57534E]">
-            <span>Delivery charge ({deliveryArea})</span>
-            <span className="font-mono tabular-nums font-medium text-[#141413]">
-              + {formatCurrency(paymentSummary.deliveryCharge, settings.currency)}
-            </span>
+
+          <div className="space-y-2 text-sm">
+            <div className="flex items-center justify-between text-[#5C5852]">
+              <span>Product amount</span>
+              <span className="font-mono tabular-nums font-medium text-[#121211]">
+                {formatCurrency(paymentSummary.productAmount, settings.currency)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-[#5C5852]">
+              <span>Delivery charge ({deliveryArea})</span>
+              <span className="font-mono tabular-nums font-medium text-[#121211]">
+                + {formatCurrency(paymentSummary.deliveryCharge, settings.currency)}
+              </span>
+            </div>
           </div>
-          <div className="border-t border-[#E2DFD7] pt-2.5 flex items-center justify-between text-base font-semibold text-[#141413]">
+
+          <div className="border-t border-dashed border-[#D8D3C8] pt-3 flex items-center justify-between text-base font-semibold text-[#121211]">
             <span>Total amount</span>
-            <span className="font-mono tabular-nums">
+            <span className="font-mono tabular-nums text-lg">
               {formatCurrency(paymentSummary.totalAmount, settings.currency)}
             </span>
           </div>
-          <div className="grid grid-cols-2 gap-3 pt-2">
-            <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-3.5 py-2.5">
-              <p className="text-xs font-medium text-emerald-800">Paid amount</p>
+
+          <div className="grid grid-cols-2 gap-3 pt-1">
+            <div className="rounded-xl bg-emerald-50/90 border border-emerald-200 px-3.5 py-2.5">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-emerald-800">
+                Paid Now
+              </p>
               <p className="mt-0.5 text-base font-semibold font-mono tabular-nums text-emerald-950">
                 {formatCurrency(paymentSummary.paidAmount, settings.currency)}
               </p>
             </div>
-            <div className="rounded-xl bg-amber-50 border border-amber-200 px-3.5 py-2.5">
-              <p className="text-xs font-medium text-amber-800">Remaining (COD)</p>
+            <div className="rounded-xl bg-amber-50/90 border border-amber-200 px-3.5 py-2.5">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-amber-800">
+                Remaining COD
+              </p>
               <p className="mt-0.5 text-base font-semibold font-mono tabular-nums text-amber-950">
                 {formatCurrency(paymentSummary.remainingAmount, settings.currency)}
               </p>
@@ -645,14 +666,14 @@ export function OrderForm({
           type="button"
           onClick={onCancel}
           disabled={submitting}
-          className="min-h-[46px] px-5 py-2.5 rounded-xl border border-[#DFDBD2] bg-white text-sm font-medium text-[#57534E] hover:bg-[#F5F3EE] disabled:opacity-50 transition-colors cursor-pointer"
+          className="min-h-[46px] px-5 py-2.5 rounded-xl border border-[#DDD8CE] bg-white text-sm font-medium text-[#5C5852] hover:bg-[#F7F5F0] disabled:opacity-50 transition-colors cursor-pointer"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={submitting || hasCompressingPhotos}
-          className="min-h-[46px] px-7 py-2.5 rounded-xl bg-[#141413] text-white text-sm font-medium hover:bg-[#292826] disabled:opacity-60 transition-colors flex items-center gap-2 cursor-pointer"
+          className="min-h-[46px] px-7 py-2.5 rounded-xl bg-[#121211] text-[#F7F5F0] text-sm font-medium hover:bg-[#272624] disabled:opacity-60 transition-colors flex items-center gap-2 cursor-pointer"
         >
           {(submitting || hasCompressingPhotos) && <Loader2 className="w-4 h-4 animate-spin" />}
           <span>
@@ -668,10 +689,10 @@ export function OrderForm({
       </div>
 
       {/* Mobile Sticky Save CTA */}
-      <div className="sm:hidden fixed bottom-16 left-0 right-0 z-20 px-4 py-3 bg-white/95 backdrop-blur-md border-t border-[#E8E5DF] flex items-center gap-3">
+      <div className="sm:hidden fixed bottom-16 left-0 right-0 z-20 px-4 py-3 bg-white/95 backdrop-blur-md border-t border-[#E6E2D8] flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] text-[#78716C]">Total · Paid</p>
-          <p className="text-xs font-semibold font-mono tabular-nums text-[#141413] truncate">
+          <p className="text-[11px] text-[#8C877E]">Total · Paid</p>
+          <p className="text-xs font-semibold font-mono tabular-nums text-[#121211] truncate">
             {formatCurrency(paymentSummary.totalAmount, settings.currency)} ·{' '}
             {formatCurrency(paymentSummary.paidAmount, settings.currency)}
           </p>
@@ -679,7 +700,7 @@ export function OrderForm({
         <button
           type="submit"
           disabled={submitting || hasCompressingPhotos}
-          className="min-h-[46px] px-6 py-2.5 rounded-xl bg-[#141413] text-white text-sm font-medium active:scale-[0.98] disabled:opacity-60 transition-transform flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+          className="min-h-[46px] px-6 py-2.5 rounded-xl bg-[#121211] text-[#F7F5F0] text-sm font-medium active:scale-[0.98] disabled:opacity-60 transition-transform flex items-center justify-center gap-2 shrink-0 cursor-pointer"
         >
           {(submitting || hasCompressingPhotos) && <Loader2 className="w-4 h-4 animate-spin" />}
           <span>

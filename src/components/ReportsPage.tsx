@@ -10,10 +10,12 @@ import {
   PLATFORMS,
   formatCurrency,
 } from '../utils/payment';
+import { PlatformIcon } from './PlatformIcon';
 
 interface ReportsPageProps {
   orders: Order[];
   settings: StoreSettings;
+  onNotify?: (text: string) => void;
 }
 
 const REPORT_PRESETS: DateRangePreset[] = [
@@ -26,10 +28,11 @@ const REPORT_PRESETS: DateRangePreset[] = [
   'all',
 ];
 
-export function ReportsPage({ orders, settings }: ReportsPageProps) {
+export function ReportsPage({ orders, settings, onNotify }: ReportsPageProps) {
   const [datePreset, setDatePreset] = useState<DateRangePreset>('this_month');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
+  const [hoveredDayKey, setHoveredDayKey] = useState<string | null>(null);
 
   const scopedOrders = useMemo(() => {
     const { start, end } = getDateRangeBounds(datePreset, customStart, customEnd);
@@ -41,7 +44,7 @@ export function ReportsPage({ orders, settings }: ReportsPageProps) {
   }, [orders, datePreset, customStart, customEnd]);
 
   const summary = useMemo(() => {
-    let totalOrders = scopedOrders.length;
+    const totalOrders = scopedOrders.length;
     let totalSales = 0;
     let totalCollected = 0;
     let totalOutstanding = 0;
@@ -76,6 +79,34 @@ export function ReportsPage({ orders, settings }: ReportsPageProps) {
       returnedOrders,
     };
   }, [scopedOrders]);
+
+  const dailyTrend = useMemo(() => {
+    const map = new Map<string, { key: string; label: string; sales: number; count: number }>();
+    for (const o of scopedOrders) {
+      if (o.status === 'CANCELLED' || o.status === 'RETURNED') continue;
+      const d = o.createdAt;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+        d.getDate()
+      ).padStart(2, '0')}`;
+      const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const prev = map.get(key);
+      if (prev) {
+        prev.sales += o.totalAmount;
+        prev.count += 1;
+      } else {
+        map.set(key, { key, label, sales: o.totalAmount, count: 1 });
+      }
+    }
+    return Array.from(map.values())
+      .sort((a, b) => a.key.localeCompare(b.key))
+      .slice(-14);
+  }, [scopedOrders]);
+
+  const maxDailySales = Math.max(1, ...dailyTrend.map((d) => d.sales));
+  const activeDay =
+    (hoveredDayKey ? dailyTrend.find((d) => d.key === hoveredDayKey) : null) ||
+    dailyTrend[dailyTrend.length - 1] ||
+    null;
 
   const platformBreakdown = useMemo(() => {
     return PLATFORMS.map((platform) => {
@@ -139,21 +170,24 @@ export function ReportsPage({ orders, settings }: ReportsPageProps) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-display font-semibold tracking-tight text-[#141413]">
-            Reports & Analytics
-          </h1>
-          <p className="text-sm text-[#57534E] mt-0.5">
+          <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[#8C877E]">
             {DATE_PRESET_LABELS[datePreset]} · {scopedOrders.length} orders in range
           </p>
+          <h1 className="mt-1 text-3xl sm:text-4xl font-display font-semibold tracking-tight text-[#121211]">
+            Reports & Analytics
+          </h1>
         </div>
 
         <button
           type="button"
           disabled={scopedOrders.length === 0}
-          onClick={() => downloadOrdersCsv(scopedOrders, `shishu-clo-report-${datePreset}`)}
-          className="min-h-[44px] px-4 py-2 rounded-xl bg-[#141413] text-white hover:bg-[#292826] disabled:opacity-50 text-xs sm:text-sm font-medium inline-flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer"
+          onClick={() => {
+            downloadOrdersCsv(scopedOrders, `shishu-clo-report-${datePreset}`);
+            onNotify?.(`Exported ${scopedOrders.length} report rows to CSV`);
+          }}
+          className="min-h-[44px] px-4 py-2 rounded-xl bg-[#121211] text-[#F7F5F0] hover:bg-[#272624] disabled:opacity-50 text-xs sm:text-sm font-medium inline-flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer"
         >
           <Download className="w-4 h-4" />
           <span>Export Report CSV</span>
@@ -161,7 +195,7 @@ export function ReportsPage({ orders, settings }: ReportsPageProps) {
       </div>
 
       {/* Date Range Selector */}
-      <div className="bg-white border border-[#E8E5DF] rounded-2xl p-4 space-y-3">
+      <div className="bg-white border border-[#E6E2D8] rounded-2xl p-4 space-y-3">
         <div className="flex flex-wrap gap-1.5">
           {REPORT_PRESETS.map((preset) => {
             const active = datePreset === preset;
@@ -172,8 +206,8 @@ export function ReportsPage({ orders, settings }: ReportsPageProps) {
                 onClick={() => setDatePreset(preset)}
                 className={`min-h-[38px] px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-medium transition-colors whitespace-nowrap cursor-pointer ${
                   active
-                    ? 'bg-[#141413] text-white'
-                    : 'bg-[#FAF9F7] text-[#57534E] hover:bg-[#F1EFEA] hover:text-[#141413]'
+                    ? 'bg-[#121211] text-[#F7F5F0]'
+                    : 'bg-[#FAF9F5] text-[#5C5852] hover:bg-[#EFECE5] hover:text-[#121211]'
                 }`}
               >
                 {DATE_PRESET_LABELS[preset]}
@@ -185,21 +219,21 @@ export function ReportsPage({ orders, settings }: ReportsPageProps) {
         {datePreset === 'custom' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-[#ECE9E2]">
             <div>
-              <label className="block text-xs font-medium text-[#57534E] mb-1">Start date</label>
+              <label className="block text-xs font-medium text-[#5C5852] mb-1">Start date</label>
               <input
                 type="date"
                 value={customStart}
                 onChange={(e) => setCustomStart(e.target.value)}
-                className="w-full min-h-[42px] px-3 py-2 rounded-xl border border-[#DFDBD2] bg-[#FAF9F7] text-sm"
+                className="w-full min-h-[42px] px-3 py-2 rounded-xl border border-[#DDD8CE] bg-[#FAF9F5] text-sm"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-[#57534E] mb-1">End date</label>
+              <label className="block text-xs font-medium text-[#5C5852] mb-1">End date</label>
               <input
                 type="date"
                 value={customEnd}
                 onChange={(e) => setCustomEnd(e.target.value)}
-                className="w-full min-h-[42px] px-3 py-2 rounded-xl border border-[#DFDBD2] bg-[#FAF9F7] text-sm"
+                className="w-full min-h-[42px] px-3 py-2 rounded-xl border border-[#DDD8CE] bg-[#FAF9F5] text-sm"
               />
             </div>
           </div>
@@ -219,23 +253,106 @@ export function ReportsPage({ orders, settings }: ReportsPageProps) {
         ].map((metric) => (
           <div
             key={metric.label}
-            className="bg-white border border-[#E8E5DF] rounded-2xl p-4 sm:p-5"
+            className="bg-white border border-[#E6E2D8] rounded-2xl p-4 sm:p-5"
           >
-            <p className="text-xs font-medium text-[#57534E]">{metric.label}</p>
-            <p className="mt-2 text-lg sm:text-2xl font-semibold font-mono tabular-nums text-[#141413] truncate">
+            <p className="text-xs font-medium text-[#5C5852]">{metric.label}</p>
+            <p className="mt-2 text-lg sm:text-2xl font-semibold font-mono tabular-nums text-[#121211] truncate">
               {metric.value}
             </p>
           </div>
         ))}
       </div>
 
+      {/* Daily Sales Trend SVG Bar Chart */}
+      {dailyTrend.length > 0 && (
+        <section className="bg-white border border-[#E6E2D8] rounded-2xl p-5 sm:p-6 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-semibold text-[#121211]">Daily Sales Trend</h2>
+              <p className="text-xs text-[#8C877E]">
+                Active order volume across recent days in range
+              </p>
+            </div>
+            {activeDay && (
+              <div className="text-left sm:text-right">
+                <p className="text-xs font-medium text-[#5C5852]">
+                  {activeDay.label} · {activeDay.count}{' '}
+                  {activeDay.count === 1 ? 'order' : 'orders'}
+                </p>
+                <p className="font-mono text-sm font-semibold text-[#121211] tabular-nums">
+                  {formatCurrency(activeDay.sales, settings.currency)}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="w-full overflow-x-auto no-scrollbar pt-2">
+            <div className="min-w-[360px]">
+              <svg
+                viewBox={`0 0 ${Math.max(dailyTrend.length * 46, 320)} 150`}
+                className="w-full h-40 overflow-visible"
+                role="img"
+                aria-label="Daily sales bar chart"
+              >
+                <line
+                  x1="0"
+                  y1="120"
+                  x2={Math.max(dailyTrend.length * 46, 320)}
+                  y2="120"
+                  stroke="#ECE9E2"
+                  strokeWidth="1"
+                />
+                {dailyTrend.map((d, idx) => {
+                  const totalWidth = Math.max(dailyTrend.length * 46, 320);
+                  const slotWidth = totalWidth / dailyTrend.length;
+                  const barWidth = Math.min(28, slotWidth * 0.56);
+                  const x = idx * slotWidth + (slotWidth - barWidth) / 2;
+                  const barHeight = Math.max(6, Math.round((d.sales / maxDailySales) * 104));
+                  const y = 120 - barHeight;
+                  const isHighlighted = activeDay?.key === d.key;
+
+                  return (
+                    <g
+                      key={d.key}
+                      onMouseEnter={() => setHoveredDayKey(d.key)}
+                      onClick={() => setHoveredDayKey(d.key)}
+                      className="cursor-pointer"
+                    >
+                      <rect
+                        x={x}
+                        y={y}
+                        width={barWidth}
+                        height={barHeight}
+                        rx="6"
+                        fill={isHighlighted ? '#121211' : '#CFCAC0'}
+                        className="transition-colors duration-150"
+                      />
+                      <text
+                        x={x + barWidth / 2}
+                        y="138"
+                        textAnchor="middle"
+                        fontSize="10"
+                        fill={isHighlighted ? '#121211' : '#8C877E'}
+                        fontWeight={isHighlighted ? '600' : '400'}
+                      >
+                        {d.label}
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Platform Breakdown Chart */}
-        <section className="bg-white border border-[#E8E5DF] rounded-2xl p-5 sm:p-6 space-y-4">
+        <section className="bg-white border border-[#E6E2D8] rounded-2xl p-5 sm:p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-[#141413]">Sales by Platform</h2>
-            <span className="text-xs text-[#78716C]">Active orders</span>
+            <h2 className="text-base font-semibold text-[#121211]">Sales by Platform</h2>
+            <span className="text-xs text-[#8C877E]">Active orders</span>
           </div>
 
           <div className="space-y-4">
@@ -244,19 +361,20 @@ export function ReportsPage({ orders, settings }: ReportsPageProps) {
               return (
                 <div key={item.platform} className="space-y-1.5">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="font-medium text-[#141413]">
-                      {item.platform}{' '}
-                      <span className="text-xs font-normal text-[#78716C] tabular-nums">
+                    <span className="font-medium text-[#121211] inline-flex items-center gap-2">
+                      <PlatformIcon platform={item.platform} className="w-3.5 h-3.5 text-[#5C5852]" />
+                      <span>{item.platform}</span>
+                      <span className="text-xs font-normal text-[#8C877E] tabular-nums">
                         ({item.count} {item.count === 1 ? 'order' : 'orders'})
                       </span>
                     </span>
-                    <span className="font-mono text-xs sm:text-sm font-semibold text-[#141413] tabular-nums">
+                    <span className="font-mono text-xs sm:text-sm font-semibold text-[#121211] tabular-nums">
                       {formatCurrency(item.sales, settings.currency)}
                     </span>
                   </div>
-                  <div className="h-2.5 w-full rounded-full bg-[#F1EFEA] overflow-hidden">
+                  <div className="h-2.5 w-full rounded-full bg-[#EFECE5] overflow-hidden">
                     <div
-                      className="h-full rounded-full bg-[#141413] transition-all duration-300"
+                      className="h-full rounded-full bg-[#121211] transition-all duration-300"
                       style={{ width: `${item.sales > 0 ? Math.max(4, widthPct) : 0}%` }}
                     />
                   </div>
@@ -266,11 +384,11 @@ export function ReportsPage({ orders, settings }: ReportsPageProps) {
           </div>
         </section>
 
-        {/* Order Status Breakdown SVG Chart */}
-        <section className="bg-white border border-[#E8E5DF] rounded-2xl p-5 sm:p-6 space-y-4">
+        {/* Order Status Breakdown Chart */}
+        <section className="bg-white border border-[#E6E2D8] rounded-2xl p-5 sm:p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-[#141413]">Orders by Status</h2>
-            <span className="text-xs text-[#78716C] tabular-nums">{scopedOrders.length} total</span>
+            <h2 className="text-base font-semibold text-[#121211]">Orders by Status</h2>
+            <span className="text-xs text-[#8C877E] tabular-nums">{scopedOrders.length} total</span>
           </div>
 
           <div className="space-y-3">
@@ -278,10 +396,10 @@ export function ReportsPage({ orders, settings }: ReportsPageProps) {
               const widthPct = Math.round((item.count / maxStatusCount) * 100);
               return (
                 <div key={item.status} className="grid grid-cols-12 items-center gap-2 text-xs">
-                  <span className="col-span-4 font-semibold text-[#141413] truncate">
+                  <span className="col-span-4 font-semibold text-[#121211] truncate">
                     {item.status}
                   </span>
-                  <div className="col-span-6 h-2.5 rounded-full bg-[#F1EFEA] overflow-hidden">
+                  <div className="col-span-6 h-2.5 rounded-full bg-[#EFECE5] overflow-hidden">
                     <div
                       className="h-full rounded-full transition-all duration-300"
                       style={{
@@ -290,7 +408,7 @@ export function ReportsPage({ orders, settings }: ReportsPageProps) {
                       }}
                     />
                   </div>
-                  <span className="col-span-2 text-right font-mono font-semibold text-[#141413] tabular-nums">
+                  <span className="col-span-2 text-right font-mono font-semibold text-[#121211] tabular-nums">
                     {item.count}
                   </span>
                 </div>
@@ -300,10 +418,10 @@ export function ReportsPage({ orders, settings }: ReportsPageProps) {
         </section>
 
         {/* Payment Type Breakdown */}
-        <section className="bg-white border border-[#E8E5DF] rounded-2xl p-5 sm:p-6 space-y-4">
+        <section className="bg-white border border-[#E6E2D8] rounded-2xl p-5 sm:p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-[#141413]">Payment Type Breakdown</h2>
-            <span className="text-xs text-[#78716C]">Count & collected</span>
+            <h2 className="text-base font-semibold text-[#121211]">Payment Type Breakdown</h2>
+            <span className="text-xs text-[#8C877E]">Count & collected</span>
           </div>
 
           <div className="space-y-3.5">
@@ -312,14 +430,14 @@ export function ReportsPage({ orders, settings }: ReportsPageProps) {
               return (
                 <div key={item.value} className="space-y-1">
                   <div className="flex items-center justify-between gap-2 text-xs sm:text-sm">
-                    <span className="font-medium text-[#141413] truncate">{item.label}</span>
-                    <span className="font-mono text-xs text-[#57534E] tabular-nums shrink-0">
+                    <span className="font-medium text-[#121211] truncate">{item.label}</span>
+                    <span className="font-mono text-xs text-[#5C5852] tabular-nums shrink-0">
                       {item.count} · {formatCurrency(item.collected, settings.currency)}
                     </span>
                   </div>
-                  <div className="h-2 rounded-full bg-[#F1EFEA] overflow-hidden">
+                  <div className="h-2 rounded-full bg-[#EFECE5] overflow-hidden">
                     <div
-                      className="h-full rounded-full bg-[#57534E] transition-all duration-300"
+                      className="h-full rounded-full bg-[#5C5852] transition-all duration-300"
                       style={{ width: `${item.count > 0 ? Math.max(4, pct) : 0}%` }}
                     />
                   </div>
@@ -330,14 +448,14 @@ export function ReportsPage({ orders, settings }: ReportsPageProps) {
         </section>
 
         {/* Top Products */}
-        <section className="bg-white border border-[#E8E5DF] rounded-2xl p-5 sm:p-6 space-y-4">
+        <section className="bg-white border border-[#E6E2D8] rounded-2xl p-5 sm:p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-[#141413]">Breakdown by Product</h2>
-            <span className="text-xs text-[#78716C]">Top pieces</span>
+            <h2 className="text-base font-semibold text-[#121211]">Breakdown by Product</h2>
+            <span className="text-xs text-[#8C877E]">Top pieces</span>
           </div>
 
           {productBreakdown.length === 0 ? (
-            <p className="text-sm text-[#78716C] py-6 text-center">
+            <p className="text-sm text-[#8C877E] py-6 text-center">
               No active product sales in this date range.
             </p>
           ) : (
@@ -348,12 +466,12 @@ export function ReportsPage({ orders, settings }: ReportsPageProps) {
                   className="py-2.5 flex items-center justify-between gap-3 text-sm"
                 >
                   <div className="min-w-0">
-                    <p className="font-medium text-[#141413] truncate">{prod.name}</p>
-                    <p className="text-xs text-[#78716C] tabular-nums">
+                    <p className="font-medium text-[#121211] truncate">{prod.name}</p>
+                    <p className="text-xs text-[#8C877E] tabular-nums">
                       {prod.count} {prod.count === 1 ? 'order' : 'orders'}
                     </p>
                   </div>
-                  <span className="font-mono text-xs sm:text-sm font-semibold text-[#141413] tabular-nums shrink-0">
+                  <span className="font-mono text-xs sm:text-sm font-semibold text-[#121211] tabular-nums shrink-0">
                     {formatCurrency(prod.sales, settings.currency)}
                   </span>
                 </div>

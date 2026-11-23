@@ -48,14 +48,22 @@ export function PrivateAccessGate({ mode, signedInEmail }: PrivateAccessGateProp
   }
 
   return (
-    <div className="min-h-screen bg-[#F8F7F4] flex items-center justify-center px-4 py-10">
-      <div className="w-full max-w-md bg-white border border-[#E8E5DF] rounded-2xl p-7 sm:p-9">
+    <div className="min-h-screen bg-[#F7F5F0] text-[#121211] flex items-center justify-center px-4 py-12">
+      <div className="w-full max-w-[420px] bg-white border border-[#E6E2D8] rounded-2xl p-8 sm:p-10 shadow-[0_12px_36px_-18px_rgba(18,18,17,0.12)]">
         <div className="text-center">
-          <p className="font-display text-3xl font-semibold tracking-[0.06em] text-[#141413]">
+          <div className="mx-auto w-12 h-12 rounded-xl overflow-hidden border border-[#E6E2D8] bg-[#F7F5F0] flex items-center justify-center mb-4">
+            <img
+              src="/favicon.ico"
+              alt="Shishu.clo"
+              className="w-8 h-8 object-contain"
+              referrerPolicy="no-referrer"
+            />
+          </div>
+          <p className="font-display text-3xl sm:text-[34px] font-semibold tracking-[0.08em] text-[#121211] leading-none">
             SHISHU.CLO
           </p>
-          <p className="mt-1 text-xs font-medium tracking-wide text-[#78716C]">
-            Order Management Atelier
+          <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.18em] text-[#8C877E]">
+            Private Order Atelier
           </p>
         </div>
 
@@ -63,18 +71,20 @@ export function PrivateAccessGate({ mode, signedInEmail }: PrivateAccessGateProp
 
         {mode === 'unauthorized' ? (
           <div className="space-y-5">
-            <div className="flex items-start gap-3 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-900">
+            <div className="flex items-start gap-3 p-4 rounded-xl bg-rose-50/90 border border-rose-200 text-rose-900">
               <ShieldAlert className="w-5 h-5 shrink-0 mt-0.5 text-rose-700" />
               <div className="text-sm leading-relaxed">
                 <p className="font-semibold">Private Workspace Access Only</p>
                 <p className="mt-1 text-rose-800">
-                  The account <span className="font-medium break-all">{signedInEmail || 'signed in'}</span> is not authorized to access Shishu.clo orders.
+                  The account{' '}
+                  <span className="font-medium break-all">{signedInEmail || 'signed in'}</span> is
+                  not authorized to access Shishu.clo orders.
                 </p>
               </div>
             </div>
 
             {error && (
-              <p className="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3">
+              <p className="text-sm text-rose-800 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3">
                 {error}
               </p>
             )}
@@ -84,7 +94,7 @@ export function PrivateAccessGate({ mode, signedInEmail }: PrivateAccessGateProp
                 type="button"
                 disabled={busy}
                 onClick={handleSwitchAccount}
-                className="w-full min-h-[46px] px-5 py-3 rounded-xl bg-[#141413] text-white text-sm font-medium hover:bg-[#292826] disabled:opacity-50 transition-colors cursor-pointer"
+                className="w-full min-h-[48px] px-5 py-3 rounded-xl bg-[#121211] text-[#F7F5F0] text-sm font-medium hover:bg-[#272624] active:scale-[0.99] disabled:opacity-50 transition-all cursor-pointer"
               >
                 {busy ? 'Opening Google Sign-In...' : 'Switch Google Account'}
               </button>
@@ -92,24 +102,23 @@ export function PrivateAccessGate({ mode, signedInEmail }: PrivateAccessGateProp
                 type="button"
                 disabled={busy}
                 onClick={handleSignOut}
-                className="w-full min-h-[44px] px-5 py-2.5 rounded-xl border border-[#DFDBD2] text-[#57534E] text-sm font-medium hover:bg-[#F5F3EE] transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full min-h-[44px] px-5 py-2.5 rounded-xl border border-[#DDD8CE] text-[#5C5852] text-sm font-medium hover:bg-[#F7F5F0] transition-colors flex items-center justify-center gap-2 cursor-pointer"
               >
                 <LogOut className="w-4 h-4" />
-                Sign Out
+                <span>Sign Out</span>
               </button>
             </div>
           </div>
         ) : (
           <div className="space-y-6">
             <div className="text-center space-y-2">
-              <div className="mx-auto w-11 h-11 rounded-full bg-[#F5F3EE] border border-[#E8E5DF] flex items-center justify-center text-[#141413]">
-                <Lock className="w-5 h-5" />
+              <div className="inline-flex items-center gap-1.5 text-xs font-medium text-[#5C5852]">
+                <Lock className="w-3.5 h-3.5 text-[#8C877E]" />
+                <span>Two-Person Private Studio</span>
               </div>
-              <h1 className="text-lg font-semibold text-[#141413]">
-                Private Studio Sign-In
-              </h1>
-              <p className="text-sm text-[#57534E] leading-relaxed">
-                Sign in with an authorized Shishu.clo Google account to manage orders, photos, and reports.
+              <p className="text-sm text-[#5C5852] leading-relaxed">
+                Sign in with an authorized Shishu.clo Google account to manage orders, piece photos,
+                and studio reports.
               </p>
             </div>
 
@@ -123,7 +132,7 @@ export function PrivateAccessGate({ mode, signedInEmail }: PrivateAccessGateProp
               type="button"
               disabled={busy}
               onClick={handleGoogleSignIn}
-              className="w-full min-h-[48px] px-5 py-3 rounded-xl bg-[#141413] text-white text-sm font-medium hover:bg-[#292826] active:scale-[0.99] disabled:opacity-50 transition-all flex items-center justify-center gap-3 cursor-pointer"
+              className="w-full min-h-[48px] px-5 py-3 rounded-xl bg-[#121211] text-[#F7F5F0] text-sm font-medium hover:bg-[#272624] active:scale-[0.99] disabled:opacity-50 transition-all flex items-center justify-center gap-3 shadow-sm cursor-pointer"
             >
               <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -131,10 +140,10 @@ export function PrivateAccessGate({ mode, signedInEmail }: PrivateAccessGateProp
                   d="M21.35 11.1h-9.17v2.73h6.51c-.33 3.81-3.5 5.44-6.5 5.44C8.36 19.27 5 16.25 5 12c0-4.1 3.2-7.27 7.2-7.27 3.09 0 4.9 1.97 4.9 1.97L19 4.72S16.56 2 12.1 2C6.42 2 2.03 6.8 2.03 12c0 5.05 4.13 10 10.22 10 5.35 0 9.25-3.67 9.25-9.09 0-1.15-.15-1.81-.15-1.81Z"
                 />
               </svg>
-              {busy ? 'Signing in...' : 'Continue with Google'}
+              <span>{busy ? 'Signing in...' : 'Continue with Google'}</span>
             </button>
 
-            <p className="text-center text-xs text-[#78716C]">
+            <p className="text-center text-xs text-[#8C877E]">
               Restricted to authorized Shishu.clo team accounts.
             </p>
           </div>

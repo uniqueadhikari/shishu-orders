@@ -29,21 +29,21 @@ export class ErrorBoundary extends React.Component<
   override render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-[#F8F7F4] flex items-center justify-center p-6">
-          <div className="max-w-md w-full bg-white border border-[#E8E5DF] rounded-2xl p-8 text-center">
-            <p className="font-display text-2xl font-semibold tracking-tight text-[#141413]">
+        <div className="min-h-screen bg-[#F7F5F0] flex items-center justify-center p-6">
+          <div className="max-w-md w-full bg-white border border-[#E6E2D8] rounded-2xl p-8 text-center">
+            <p className="font-display text-2xl font-semibold tracking-tight text-[#121211]">
               SHISHU.CLO
             </p>
-            <h1 className="mt-4 text-lg font-semibold text-[#141413]">
+            <h1 className="mt-4 text-lg font-semibold text-[#121211]">
               Something went wrong
             </h1>
-            <p className="mt-2 text-sm text-[#57534E] leading-relaxed">
+            <p className="mt-2 text-sm text-[#5C5852] leading-relaxed">
               {this.state.message}
             </p>
             <button
               type="button"
               onClick={() => window.location.reload()}
-              className="mt-6 w-full min-h-[44px] px-5 py-2.5 rounded-xl bg-[#141413] text-white text-sm font-medium hover:bg-[#292826] transition-colors cursor-pointer"
+              className="mt-6 w-full min-h-[44px] px-5 py-2.5 rounded-xl bg-[#121211] text-[#F7F5F0] text-sm font-medium hover:bg-[#272624] transition-colors cursor-pointer"
             >
               Reload Application
             </button>
