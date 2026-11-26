@@ -29,7 +29,11 @@ import {
   updateOrder,
   validateOrderForm,
 } from '../services/orders';
-import { compressImageToTarget, warmStorageProbe } from '../services/storage';
+import {
+  buildCatalogPhotoOptions,
+  compressImageToTarget,
+  warmStorageProbe,
+} from '../services/storage';
 import type {
   InventoryFormValues,
   InventoryItem,
@@ -42,7 +46,7 @@ import type {
 import { formatShortDate } from '../utils/date';
 import { ORDER_STATUSES, formatAmountDisplay } from '../utils/payment';
 import { OrderPhoto } from './OrderPhoto';
-import { type PhotoItem, PhotoUploader } from './PhotoUploader';
+import { type CatalogPhotoOption, type PhotoItem, PhotoUploader } from './PhotoUploader';
 
 interface OrderFormProps {
   mode: 'create' | 'edit';
@@ -173,6 +177,7 @@ export function OrderForm({
   });
   const [quickStockBusy, setQuickStockBusy] = useState(false);
   const [quickStockError, setQuickStockError] = useState<string | null>(null);
+  const [reuseOrderPhotoInStock, setReuseOrderPhotoInStock] = useState(true);
 
   const [photoItems, setPhotoItems] = useState<PhotoItem[]>(() => {
     if (initialOrder?.photos?.length) {
@@ -180,7 +185,8 @@ export function OrderForm({
         id: `existing-${idx}-${url}`,
         previewUrl: url,
         existingUrl: url,
-        existingPath: initialOrder?.photoPaths?.[idx] ?? '',
+        existingPath:
+          initialOrder?.photoPaths?.[idx] || (url.startsWith('fsphoto:') ? url : ''),
       }));
     }
     if (seedItem?.photoUrl) {
@@ -189,13 +195,15 @@ export function OrderForm({
           id: `stock-photo-${seedItem.id}`,
           previewUrl: seedItem.photoUrl,
           existingUrl: seedItem.photoUrl,
-          existingPath: '',
+          existingPath:
+            seedItem.photoPath ||
+            (seedItem.photoUrl.startsWith('fsphoto:') ? seedItem.photoUrl : ''),
         },
       ];
     }
     return [];
   });
-  const [removedPaths, setRemovedPaths] = useState<string[]>([]);
+  const [removedPhotoRefs, setRemovedPhotoRefs] = useState<Array<{ url?: string; path?: string }>>([]);
   const createdBlobUrlsRef = useRef<Set<string>>(new Set());
 
   const [submitting, setSubmitting] = useState(false);
@@ -468,6 +476,11 @@ export function OrderForm({
     }
   }
 
+  const catalogPhotos = useMemo(
+    () => buildCatalogPhotoOptions(allInventory, orders),
+    [allInventory, orders]
+  );
+
   function attachStockPhotoIfSpace(stockItem: InventoryItem) {
     if (!stockItem.photoUrl) return;
     setPhotoItems((prev) => {
@@ -479,7 +492,26 @@ export function OrderForm({
           id: `stock-photo-${stockItem.id}-${Date.now()}`,
           previewUrl: stockItem.photoUrl,
           existingUrl: stockItem.photoUrl,
-          existingPath: '',
+          existingPath:
+            stockItem.photoPath ||
+            (stockItem.photoUrl.startsWith('fsphoto:') ? stockItem.photoUrl : ''),
+        },
+      ];
+    });
+  }
+
+  function handleSelectCatalogPhoto(photo: CatalogPhotoOption) {
+    setError(null);
+    setPhotoItems((prev) => {
+      if (prev.length >= 3) return prev;
+      if (prev.some((p) => p.existingUrl === photo.url)) return prev;
+      return [
+        ...prev,
+        {
+          id: `catalog-photo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          previewUrl: photo.url,
+          existingUrl: photo.url,
+          existingPath: photo.path || (photo.url.startsWith('fsphoto:') ? photo.url : ''),
         },
       ];
     });
@@ -606,6 +638,7 @@ export function OrderForm({
       unitPrice: row?.unitPrice.trim() || totalAmount.trim(),
       notes: '',
     });
+    setReuseOrderPhotoInStock(photoItems.length > 0);
     setQuickStockError(null);
     setQuickStockOpen(true);
   }
@@ -617,10 +650,58 @@ export function OrderForm({
       setQuickStockError(validationErr);
       return;
     }
+    const firstOrderPhoto = reuseOrderPhotoInStock ? photoItems[0] : undefined;
+    if (firstOrderPhoto?.compressing) {
+      setQuickStockError('Please wait a moment while the photo finishes optimizing.');
+      return;
+    }
+
     setQuickStockBusy(true);
     setQuickStockError(null);
     try {
-      const created = await createInventoryItem(quickStockValues, null, user, settings);
+      const canReuseExisting = Boolean(firstOrderPhoto?.existingUrl);
+      const localPhotoInput: NewPhotoInput | null =
+        firstOrderPhoto && !canReuseExisting
+          ? firstOrderPhoto.compressed ?? firstOrderPhoto.file ?? null
+          : null;
+      const existingPhotoRef =
+        firstOrderPhoto && canReuseExisting
+          ? {
+              url: firstOrderPhoto.existingUrl!,
+              path:
+                firstOrderPhoto.existingPath ||
+                (firstOrderPhoto.existingUrl!.startsWith('fsphoto:')
+                  ? firstOrderPhoto.existingUrl!
+                  : ''),
+            }
+          : null;
+
+      const created = await createInventoryItem(
+        quickStockValues,
+        localPhotoInput,
+        user,
+        settings,
+        existingPhotoRef
+      );
+
+      if (firstOrderPhoto && !canReuseExisting && created.photoUrl) {
+        setPhotoItems((prev) =>
+          prev.map((p) => {
+            if (p.id !== firstOrderPhoto.id) return p;
+            if (p.previewUrl.startsWith('blob:')) {
+              URL.revokeObjectURL(p.previewUrl);
+              createdBlobUrlsRef.current.delete(p.previewUrl);
+            }
+            return {
+              id: p.id,
+              previewUrl: created.photoUrl,
+              existingUrl: created.photoUrl,
+              existingPath: created.photoPath,
+            };
+          })
+        );
+      }
+
       setRecentlyAddedStock(created);
       onInventoryCreated?.(created);
       handleSelectStockSuggestion(created, quickStockTargetRowId ?? undefined);
@@ -686,8 +767,11 @@ export function OrderForm({
   function handleRemovePhoto(id: string) {
     const target = photoItems.find((p) => p.id === id);
     if (!target) return;
-    if (target.existingPath) {
-      setRemovedPaths((prev) => [...prev, target.existingPath!]);
+    if (target.existingUrl || target.existingPath) {
+      setRemovedPhotoRefs((prev) => [
+        ...prev,
+        { url: target.existingUrl, path: target.existingPath },
+      ]);
     }
     if (target.previewUrl.startsWith('blob:')) {
       URL.revokeObjectURL(target.previewUrl);
@@ -736,19 +820,30 @@ export function OrderForm({
       else if (item.file) newPhotos.push(item.file);
     }
 
+    const reusedPhotos = photoItems
+      .filter((p) => Boolean(p.existingUrl))
+      .map((p) => ({
+        url: p.existingUrl as string,
+        path:
+          p.existingPath || (p.existingUrl?.startsWith('fsphoto:') ? p.existingUrl : ''),
+      }));
+
     setSubmitting(true);
     setSaveStage(newPhotos.length > 0 ? 'Uploading photos...' : 'Saving order...');
     try {
       if (mode === 'create') {
-        const created = await createOrder(values, newPhotos, user, settings, setSaveStage);
+        const created = await createOrder(
+          values,
+          newPhotos,
+          user,
+          settings,
+          setSaveStage,
+          reusedPhotos
+        );
         onSuccess(created);
       } else if (initialOrder) {
-        const keptPhotos = photoItems
-          .filter((p) => p.existingUrl)
-          .map((p) => p.existingUrl as string);
-        const keptPaths = photoItems
-          .filter((p) => p.existingPath)
-          .map((p) => p.existingPath as string);
+        const keptPhotos = reusedPhotos.map((p) => p.url);
+        const keptPaths = reusedPhotos.map((p) => p.path).filter(Boolean);
 
         await updateOrder(
           initialOrder,
@@ -756,9 +851,11 @@ export function OrderForm({
           keptPhotos,
           keptPaths,
           newPhotos,
-          removedPaths,
+          removedPhotoRefs,
           user,
-          setSaveStage
+          setSaveStage,
+          orders,
+          allInventory
         );
         onSuccess(initialOrder);
       }
@@ -1322,6 +1419,8 @@ export function OrderForm({
             onAddFiles={handleAddFiles}
             onRemoveItem={handleRemovePhoto}
             maxPhotos={3}
+            catalogPhotos={catalogPhotos}
+            onSelectCatalogPhoto={handleSelectCatalogPhoto}
           />
 
           <div>
@@ -1609,6 +1708,33 @@ export function OrderForm({
               </div>
             </div>
 
+            {photoItems.length > 0 && (
+              <label className="flex items-center gap-3 rounded-xl border border-[#E6E2D8] bg-[#FAF9F5] p-2.5 cursor-pointer">
+                <div className="w-10 h-10 rounded-lg overflow-hidden border border-[#E6E2D8] bg-white shrink-0 flex items-center justify-center">
+                  <OrderPhoto
+                    src={photoItems[0].previewUrl}
+                    alt="Order photo preview"
+                    className="w-full h-full object-cover"
+                    lazy={false}
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-[#121211]">
+                    Reuse order photo for this stock piece
+                  </p>
+                  <p className="text-[11px] text-[#8C877E]">
+                    Shares 1 stored image between inventory &amp; order
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={reuseOrderPhotoInStock}
+                  onChange={(e) => setReuseOrderPhotoInStock(e.target.checked)}
+                  className="w-4 h-4 accent-[#121211] cursor-pointer"
+                />
+              </label>
+            )}
+
             <div className="flex items-center justify-end gap-2.5 pt-2">
               <button
                 type="button"
@@ -1620,7 +1746,10 @@ export function OrderForm({
               </button>
               <button
                 type="submit"
-                disabled={quickStockBusy}
+                disabled={
+                  quickStockBusy ||
+                  (reuseOrderPhotoInStock && Boolean(photoItems[0]?.compressing))
+                }
                 className="min-h-[42px] px-5 py-2 rounded-xl bg-[#121211] text-[#F7F5F0] text-sm font-medium hover:bg-[#272624] disabled:opacity-60 inline-flex items-center gap-2 cursor-pointer"
               >
                 {quickStockBusy && <Loader2 className="w-4 h-4 animate-spin" />}

@@ -13,6 +13,7 @@ import {
 import { OWNER_EMAIL, db } from '../firebase/config';
 import { OperationType, handleFirestoreError } from '../firebase/errors';
 import type {
+  InventoryItem,
   Order,
   OrderFormValues,
   OrderLineItem,
@@ -24,6 +25,7 @@ import {
   type CompressedPhoto,
   compressImageToTarget,
   deleteStoragePaths,
+  filterUnreferencedCleanupPaths,
   uploadPreparedOrderPhotos,
 } from './storage';
 
@@ -349,14 +351,28 @@ function aggregateStockQty(items: OrderLineItem[], onlyDeducted: boolean): Map<s
   return map;
 }
 
+export interface ReusedPhotoRef {
+  url: string;
+  path?: string;
+}
+
 export async function createOrder(
   values: OrderFormValues,
   newPhotos: NewPhotoInput[],
   user: User,
   settings: StoreSettings,
-  onStage?: (stage: string) => void
+  onStage?: (stage: string) => void,
+  reusedPhotos: ReusedPhotoRef[] = []
 ): Promise<CreatedOrderResult> {
-  const validationError = validateOrderForm(values, newPhotos.length);
+  const sanitizedReused = reusedPhotos
+    .map((p) => {
+      const url = (p.url ?? '').trim();
+      const path = (p.path ?? '').trim() || (url.startsWith('fsphoto:') ? url : '');
+      return { url, path };
+    })
+    .filter((p) => Boolean(p.url));
+
+  const validationError = validateOrderForm(values, sanitizedReused.length + newPhotos.length);
   if (validationError) {
     throw new Error(validationError);
   }
@@ -365,16 +381,21 @@ export async function createOrder(
   const orderId = newOrderRef.id;
   const teamEmails = buildTeamEmails(settings, user.email);
 
-  let photoUrls: string[] = [];
-  let photoPaths: string[] = [];
+  const reusedUrls = sanitizedReused.map((p) => p.url);
+  const reusedPaths = sanitizedReused.map((p) => p.path).filter(Boolean);
+  let newlyUploadedUrls: string[] = [];
+  let newlyUploadedPaths: string[] = [];
 
   if (newPhotos.length > 0) {
     onStage?.('Uploading photos...');
     const prepared = await ensureCompressedPhotos(newPhotos);
     const uploadedPhotos = await uploadPreparedOrderPhotos(orderId, prepared, user, teamEmails);
-    photoUrls = uploadedPhotos.map((p) => p.url);
-    photoPaths = uploadedPhotos.map((p) => p.path);
+    newlyUploadedUrls = uploadedPhotos.map((p) => p.url);
+    newlyUploadedPaths = uploadedPhotos.map((p) => p.path);
   }
+
+  const photoUrls = [...reusedUrls, ...newlyUploadedUrls].slice(0, 3);
+  const photoPaths = [...reusedPaths, ...newlyUploadedPaths].slice(0, 3);
 
   onStage?.('Saving order & updating stock...');
   const currentYear = new Date().getFullYear();
@@ -530,8 +551,8 @@ export async function createOrder(
       stockUpdates,
     };
   } catch (error) {
-    if (photoPaths.length > 0) {
-      await deleteStoragePaths(photoPaths);
+    if (newlyUploadedPaths.length > 0) {
+      await deleteStoragePaths(newlyUploadedPaths);
     }
     if (error instanceof StockConflictError) {
       throw error;
@@ -546,9 +567,11 @@ export async function updateOrder(
   keptPhotos: string[],
   keptPhotoPaths: string[],
   newPhotos: NewPhotoInput[],
-  removedPhotoPaths: string[],
+  removedPhotoRefs: { url?: string; path?: string }[],
   user: User,
-  onStage?: (stage: string) => void
+  onStage?: (stage: string) => void,
+  allOrders: Order[] = [],
+  allInventory: InventoryItem[] = []
 ): Promise<void> {
   const totalPhotos = keptPhotos.length + newPhotos.length;
   const validationError = validateOrderForm(values, totalPhotos);
@@ -677,8 +700,17 @@ export async function updateOrder(
     handleFirestoreError(error, OperationType.UPDATE, `orders/${existingOrder.id}`);
   }
 
-  if (removedPhotoPaths.length > 0) {
-    void deleteStoragePaths(removedPhotoPaths);
+  if (removedPhotoRefs.length > 0) {
+    const remainingOrders = allOrders.filter((o) => o.id !== existingOrder.id);
+    const cleanupTargets = filterUnreferencedCleanupPaths(
+      removedPhotoRefs,
+      remainingOrders,
+      allInventory,
+      { urls: finalPhotos, paths: finalPhotoPaths }
+    );
+    if (cleanupTargets.length > 0) {
+      void deleteStoragePaths(cleanupTargets);
+    }
   }
 }
 
@@ -939,9 +971,15 @@ export async function markOrderPaidAndComplete(
   }
 }
 
-export async function deleteOrder(order: Order): Promise<{ stockRestored: boolean }> {
+export async function deleteOrder(
+  order: Order,
+  allOrders: Order[] = [],
+  allInventory: InventoryItem[] = []
+): Promise<{ stockRestored: boolean }> {
   const orderRef = doc(db, 'orders', order.id);
   let stockRestored = false;
+  let livePhotos: string[] = order.photos;
+  let livePhotoPaths: string[] = order.photoPaths;
 
   try {
     await runTransaction(db, async (tx) => {
@@ -949,6 +987,8 @@ export async function deleteOrder(order: Order): Promise<{ stockRestored: boolea
       if (!orderSnap.exists()) return;
 
       const liveOrder = mapDocToOrder(orderSnap.id, orderSnap.data() as Record<string, unknown>);
+      livePhotos = liveOrder.photos;
+      livePhotoPaths = liveOrder.photoPaths;
       const liveItems = getOrderLineItems(liveOrder);
       const restoreMap = aggregateStockQty(liveItems, true);
 
@@ -977,8 +1017,18 @@ export async function deleteOrder(order: Order): Promise<{ stockRestored: boolea
     handleFirestoreError(error, OperationType.DELETE, `orders/${order.id}`);
   }
 
-  if (order.photoPaths.length > 0) {
-    await deleteStoragePaths(order.photoPaths);
+  const candidateTargets: { url?: string; path?: string }[] = [
+    ...livePhotoPaths.map((p) => ({ path: p })),
+    ...livePhotos.map((u) => ({ url: u })),
+  ];
+  const remainingOrders = allOrders.filter((o) => o.id !== order.id);
+  const cleanupTargets = filterUnreferencedCleanupPaths(
+    candidateTargets,
+    remainingOrders,
+    allInventory
+  );
+  if (cleanupTargets.length > 0) {
+    await deleteStoragePaths(cleanupTargets);
   }
 
   return { stockRestored };

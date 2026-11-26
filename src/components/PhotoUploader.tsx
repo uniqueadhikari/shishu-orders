@@ -1,5 +1,5 @@
-import { Camera, Expand, ImagePlus, Loader2, Trash2 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { Camera, ChevronDown, Expand, ImagePlus, Images, Loader2, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CompressedPhoto } from '../services/storage';
 import { ImageLightbox } from './ImageLightbox';
 import { OrderPhoto } from './OrderPhoto';
@@ -14,11 +14,20 @@ export interface PhotoItem {
   existingPath?: string;
 }
 
+export interface CatalogPhotoOption {
+  url: string;
+  path: string;
+  label: string;
+  source: 'stock' | 'order';
+}
+
 interface PhotoUploaderProps {
   items: PhotoItem[];
   onAddFiles: (files: File[]) => void;
   onRemoveItem: (id: string) => void;
   maxPhotos?: number;
+  catalogPhotos?: CatalogPhotoOption[];
+  onSelectCatalogPhoto?: (photo: CatalogPhotoOption) => void;
 }
 
 export function PhotoUploader({
@@ -26,23 +35,37 @@ export function PhotoUploader({
   onAddFiles,
   onRemoveItem,
   maxPhotos = 3,
+  catalogPhotos = [],
+  onSelectCatalogPhoto,
 }: PhotoUploaderProps) {
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+
+  const availableCatalogPhotos = useMemo(
+    () =>
+      catalogPhotos.filter(
+        (cp) => !items.some((item) => item.existingUrl === cp.url || item.previewUrl === cp.url)
+      ),
+    [catalogPhotos, items]
+  );
 
   useEffect(() => {
     if (items.length < maxPhotos && errorMsg) {
       setErrorMsg(null);
     }
-  }, [items.length, maxPhotos, errorMsg]);
+    if (items.length >= maxPhotos && catalogOpen) {
+      setCatalogOpen(false);
+    }
+  }, [items.length, maxPhotos, errorMsg, catalogOpen]);
 
   function handleFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
     const remainingSlots = maxPhotos - items.length;
     if (remainingSlots <= 0) {
-      setErrorMsg(`Maximum ${maxPhotos} photos allowed per order.`);
+      setErrorMsg(`Maximum ${maxPhotos} photos allowed.`);
       return;
     }
 
@@ -56,7 +79,7 @@ export function PhotoUploader({
       if (validImages.length < remainingSlots) {
         validImages.push(f);
       } else {
-        setErrorMsg(`Only ${maxPhotos} photos max per order. Extra files were skipped.`);
+        setErrorMsg(`Only ${maxPhotos} photos max. Extra files were skipped.`);
       }
     }
 
@@ -66,13 +89,31 @@ export function PhotoUploader({
   }
 
   const allUrls = items.map((item) => item.previewUrl);
+  const showCatalogButton =
+    Boolean(onSelectCatalogPhoto) && availableCatalogPhotos.length > 0 && items.length < maxPhotos;
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-[#5C5852]">
           Reference Photos ({items.length}/{maxPhotos} optional)
         </span>
+
+        {showCatalogButton && (
+          <button
+            type="button"
+            onClick={() => setCatalogOpen((prev) => !prev)}
+            className="text-xs font-medium text-[#121211] hover:opacity-75 inline-flex items-center gap-1 cursor-pointer"
+          >
+            <Images className="w-3.5 h-3.5 text-[#5C5852]" />
+            <span>From Catalog ({availableCatalogPhotos.length})</span>
+            <ChevronDown
+              className={`w-3.5 h-3.5 text-[#5C5852] transition-transform ${
+                catalogOpen ? 'rotate-180' : ''
+              }`}
+            />
+          </button>
+        )}
       </div>
 
       {items.length > 0 && (
@@ -95,13 +136,15 @@ export function PhotoUploader({
                   <Loader2 className="w-4 h-4 animate-spin" />
                   <span>Optimizing</span>
                 </div>
-              ) : (
-                item.compressed && (
-                  <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/65 text-white text-[10px] font-mono tabular-nums pointer-events-none">
-                    {Math.max(1, Math.round(item.compressed.sizeBytes / 1024))} KB
-                  </span>
-                )
-              )}
+              ) : item.compressed ? (
+                <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/65 text-white text-[10px] font-mono tabular-nums pointer-events-none">
+                  {Math.max(1, Math.round(item.compressed.sizeBytes / 1024))} KB
+                </span>
+              ) : item.existingUrl ? (
+                <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/65 text-white text-[10px] font-medium pointer-events-none">
+                  Saved
+                </span>
+              ) : null}
 
               <button
                 type="button"
@@ -121,6 +164,53 @@ export function PhotoUploader({
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {catalogOpen && showCatalogButton && (
+        <div className="rounded-xl border border-[#E6E2D8] bg-[#FAF9F5] p-3 space-y-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-medium text-[#5C5852]">
+              Tap an existing Stock or Order photo to reuse without re-uploading
+            </span>
+            <button
+              type="button"
+              onClick={() => setCatalogOpen(false)}
+              className="text-[11px] text-[#8C877E] hover:text-[#121211] cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 max-h-48 overflow-y-auto pr-0.5">
+            {availableCatalogPhotos.map((cp) => (
+              <button
+                key={cp.url}
+                type="button"
+                onClick={() => {
+                  onSelectCatalogPhoto?.(cp);
+                  if (items.length + 1 >= maxPhotos) {
+                    setCatalogOpen(false);
+                  }
+                }}
+                className="group text-left rounded-lg border border-[#DDD8CE] bg-white hover:border-[#121211] overflow-hidden transition-colors cursor-pointer"
+                title={cp.label}
+              >
+                <div className="relative aspect-square bg-[#F7F5F0] flex items-center justify-center overflow-hidden">
+                  <OrderPhoto
+                    src={cp.url}
+                    alt={cp.label || 'Catalog photo'}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                  />
+                  <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/65 text-white text-[9px] font-medium uppercase tracking-wider">
+                    {cp.source === 'stock' ? 'Stock' : 'Order'}
+                  </span>
+                </div>
+                <p className="px-1.5 py-1 text-[10px] font-medium text-[#121211] truncate">
+                  {cp.label || 'Saved photo'}
+                </p>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

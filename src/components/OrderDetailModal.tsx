@@ -34,6 +34,7 @@ import { StatusBadge } from './StatusBadge';
 
 interface OrderDetailModalProps {
   order: Order;
+  orders: Order[];
   inventory: InventoryItem[];
   settings: StoreSettings;
   onClose: () => void;
@@ -54,6 +55,7 @@ const PIPELINE_STEPS: OrderStatus[] = [
 
 export function OrderDetailModal({
   order,
+  orders,
   inventory,
   settings,
   onClose,
@@ -168,7 +170,7 @@ export function OrderDetailModal({
     setDeleting(true);
     try {
       const orderNum = order.orderNumber;
-      const result = await deleteOrder(order);
+      const result = await deleteOrder(order, orders, inventory);
       onDeleted(result.stockRestored, orderNum);
     } catch (err) {
       setError(getUserFriendlyError(err, 'Could not delete this order.'));

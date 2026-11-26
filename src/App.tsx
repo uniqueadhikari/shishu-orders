@@ -262,6 +262,7 @@ function AppShell() {
       ) : selectedOrder ? (
         <OrderDetailModal
           order={selectedOrder}
+          orders={orders}
           inventory={inventory}
           settings={settings}
           onClose={() => setSelectedOrderId(null)}

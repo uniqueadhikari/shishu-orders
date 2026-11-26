@@ -338,11 +338,65 @@ export async function resolvePhotoUrl(src: string): Promise<string | null> {
   return fetchPromise;
 }
 
+export function isManagedPhotoRef(val: string): boolean {
+  return (
+    val.startsWith('fsphoto:') ||
+    val.startsWith('orders/') ||
+    val.includes('firebasestorage.googleapis.com')
+  );
+}
+
+export function filterUnreferencedCleanupPaths(
+  targets: Array<{ url?: string; path?: string }>,
+  remainingOrders: Array<{ id: string; photos: string[]; photoPaths: string[] }>,
+  remainingInventory: Array<{ id: string; photoUrl: string; photoPath: string }>,
+  stillKeptOnSelf?: { urls: string[]; paths: string[] }
+): string[] {
+  const toDelete = new Set<string>();
+
+  for (const target of targets) {
+    const u = (target.url ?? '').trim();
+    const p = (target.path ?? '').trim();
+    const handle = p || (u && isManagedPhotoRef(u) ? u : '');
+    if (!handle) continue;
+
+    const keptOnSelf =
+      Boolean(stillKeptOnSelf) &&
+      ((u && stillKeptOnSelf!.urls.includes(u)) ||
+        (p && stillKeptOnSelf!.paths.includes(p)) ||
+        stillKeptOnSelf!.urls.includes(handle) ||
+        stillKeptOnSelf!.paths.includes(handle));
+    if (keptOnSelf) continue;
+
+    const usedInOrder = remainingOrders.some(
+      (o) =>
+        (u && (o.photos.includes(u) || o.photoPaths.includes(u))) ||
+        (p && (o.photoPaths.includes(p) || o.photos.includes(p))) ||
+        o.photos.includes(handle) ||
+        o.photoPaths.includes(handle)
+    );
+    if (usedInOrder) continue;
+
+    const usedInInventory = remainingInventory.some(
+      (inv) =>
+        (u && (inv.photoUrl === u || inv.photoPath === u)) ||
+        (p && (inv.photoPath === p || inv.photoUrl === p)) ||
+        inv.photoUrl === handle ||
+        inv.photoPath === handle
+    );
+    if (usedInInventory) continue;
+
+    toDelete.add(handle);
+  }
+
+  return Array.from(toDelete);
+}
+
 export async function deleteStoragePaths(paths: string[]): Promise<void> {
   if (!paths || paths.length === 0) return;
+  const uniquePaths = Array.from(new Set(paths.map((p) => p.trim()).filter(Boolean)));
   await Promise.all(
-    paths.map(async (path) => {
-      if (!path) return;
+    uniquePaths.map(async (path) => {
       if (path.startsWith('fsphoto:')) {
         const photoId = path.slice('fsphoto:'.length);
         photoDataUrlCache.delete(path);
@@ -363,4 +417,48 @@ export async function deleteStoragePaths(paths: string[]): Promise<void> {
       }
     })
   );
+}
+
+export interface CatalogPhotoChoice {
+  url: string;
+  path: string;
+  label: string;
+  source: 'stock' | 'order';
+}
+
+export function buildCatalogPhotoOptions(
+  inventory: Array<{ pieceName: string; color: string; photoUrl: string; photoPath: string }>,
+  orders: Array<{ orderNumber: string; productName: string; photos: string[]; photoPaths: string[] }>
+): CatalogPhotoChoice[] {
+  const byUrl = new Map<string, CatalogPhotoChoice>();
+
+  for (const inv of inventory) {
+    const url = (inv.photoUrl ?? '').trim();
+    if (!url) continue;
+    const path = (inv.photoPath ?? '').trim() || (url.startsWith('fsphoto:') ? url : '');
+    const label = [inv.pieceName, inv.color].filter(Boolean).join(' · ') || 'Stock piece';
+    const existing = byUrl.get(url);
+    if (!existing) {
+      byUrl.set(url, { url, path, label, source: 'stock' });
+    } else if (!existing.path && path) {
+      existing.path = path;
+    }
+  }
+
+  for (const order of orders) {
+    for (let i = 0; i < order.photos.length; i++) {
+      const url = (order.photos[i] ?? '').trim();
+      if (!url) continue;
+      const path = (order.photoPaths[i] ?? '').trim() || (url.startsWith('fsphoto:') ? url : '');
+      const label = order.productName.trim() || order.orderNumber || 'Order photo';
+      const existing = byUrl.get(url);
+      if (!existing) {
+        byUrl.set(url, { url, path, label, source: 'order' });
+      } else if (!existing.path && path) {
+        existing.path = path;
+      }
+    }
+  }
+
+  return Array.from(byUrl.values());
 }

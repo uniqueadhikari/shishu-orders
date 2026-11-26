@@ -25,7 +25,7 @@ import {
   validateInventoryForm,
 } from '../services/inventory';
 import { type NewPhotoInput, getOrderLineItems } from '../services/orders';
-import { compressImageToTarget } from '../services/storage';
+import { buildCatalogPhotoOptions, compressImageToTarget } from '../services/storage';
 import type {
   InventoryFormValues,
   InventoryItem,
@@ -36,7 +36,7 @@ import { downloadInventoryCsv } from '../utils/csv';
 import { formatShortDate } from '../utils/date';
 import { formatAmountDisplay } from '../utils/payment';
 import { OrderPhoto } from './OrderPhoto';
-import { type PhotoItem, PhotoUploader } from './PhotoUploader';
+import { type CatalogPhotoOption, type PhotoItem, PhotoUploader } from './PhotoUploader';
 import { StatusBadge } from './StatusBadge';
 
 interface InventoryPageProps {
@@ -202,6 +202,11 @@ export function InventoryPage({
     });
   }, [items, search, stockFilter, colorFilter]);
 
+  const catalogPhotos = useMemo(
+    () => buildCatalogPhotoOptions(items, orders),
+    [items, orders]
+  );
+
   function openAddModal(preset?: Partial<InventoryFormValues>) {
     setEditingItem(null);
     setFormValues({
@@ -237,7 +242,8 @@ export function InventoryPage({
               id: `existing-${item.id}`,
               previewUrl: item.photoUrl,
               existingUrl: item.photoUrl,
-              existingPath: item.photoPath,
+              existingPath:
+                item.photoPath || (item.photoUrl.startsWith('fsphoto:') ? item.photoUrl : ''),
             },
           ]
         : []
@@ -247,10 +253,40 @@ export function InventoryPage({
     setModalOpen(true);
   }
 
+  function handleSelectModalCatalogPhoto(photo: CatalogPhotoOption) {
+    setModalError(null);
+    for (const p of photoItems) {
+      if (p.previewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(p.previewUrl);
+        blobUrlsRef.current.delete(p.previewUrl);
+      }
+      if (p.existingPath) {
+        setRemovedPhotoPath(p.existingPath);
+      }
+    }
+    setPhotoItems([
+      {
+        id: `inv-catalog-${Date.now()}`,
+        previewUrl: photo.url,
+        existingUrl: photo.url,
+        existingPath: photo.path || (photo.url.startsWith('fsphoto:') ? photo.url : ''),
+      },
+    ]);
+  }
+
   function handleAddModalFiles(files: File[]) {
     const file = files[0];
     if (!file) return;
     setModalError(null);
+    for (const p of photoItems) {
+      if (p.previewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(p.previewUrl);
+        blobUrlsRef.current.delete(p.previewUrl);
+      }
+      if (p.existingPath) {
+        setRemovedPhotoPath(p.existingPath);
+      }
+    }
     const rawUrl = URL.createObjectURL(file);
     blobUrlsRef.current.add(rawUrl);
     const itemId = `inv-new-${Date.now()}`;
@@ -335,10 +371,8 @@ export function InventoryPage({
 
       if (editingItem) {
         const keptUrl = firstPhoto?.existingUrl ?? '';
-        const keptPath = firstPhoto?.existingPath ?? '';
-        const sharedByOrder =
-          Boolean(editingItem.photoUrl) &&
-          orders.some((o) => o.photos.includes(editingItem.photoUrl));
+        const keptPath =
+          firstPhoto?.existingPath || (keptUrl.startsWith('fsphoto:') ? keptUrl : '');
         await updateInventoryItem(
           editingItem,
           formValues,
@@ -347,12 +381,21 @@ export function InventoryPage({
           newPhoto,
           removedPhotoPath,
           user,
-          sharedByOrder
+          orders,
+          items
         );
         onNotify?.(`Updated ${formValues.pieceName.trim()}`);
         setModalOpen(false);
       } else {
-        await createInventoryItem(formValues, newPhoto, user, settings);
+        const existingPhoto = firstPhoto?.existingUrl
+          ? {
+              url: firstPhoto.existingUrl,
+              path:
+                firstPhoto.existingPath ||
+                (firstPhoto.existingUrl.startsWith('fsphoto:') ? firstPhoto.existingUrl : ''),
+            }
+          : null;
+        await createInventoryItem(formValues, newPhoto, user, settings, existingPhoto);
         onNotify?.(`Added ${formValues.pieceName.trim()} to inventory`);
         if (addAnotherColor) {
           for (const p of photoItems) {
@@ -421,10 +464,7 @@ export function InventoryPage({
     setPageError(null);
     try {
       const name = deleteTarget.pieceName;
-      const sharedByOrder =
-        Boolean(deleteTarget.photoUrl) &&
-        orders.some((o) => o.photos.includes(deleteTarget.photoUrl));
-      await deleteInventoryItem(deleteTarget, sharedByOrder);
+      await deleteInventoryItem(deleteTarget, orders, items);
       setDeleteTarget(null);
       onNotify?.(`Removed ${name} from inventory`);
     } catch (err) {
@@ -1243,6 +1283,8 @@ export function InventoryPage({
               onAddFiles={handleAddModalFiles}
               onRemoveItem={handleRemoveModalPhoto}
               maxPhotos={1}
+              catalogPhotos={catalogPhotos}
+              onSelectCatalogPhoto={handleSelectModalCatalogPhoto}
             />
 
             <div>

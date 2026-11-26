@@ -14,11 +14,12 @@ import {
 } from 'firebase/firestore';
 import { OWNER_EMAIL, db } from '../firebase/config';
 import { OperationType, handleFirestoreError } from '../firebase/errors';
-import type { InventoryFormValues, InventoryItem, StoreSettings } from '../types/order';
+import type { InventoryFormValues, InventoryItem, Order, StoreSettings } from '../types/order';
 import { buildTeamEmails, type NewPhotoInput } from './orders';
 import {
   compressImageToTarget,
   deleteStoragePaths,
+  filterUnreferencedCleanupPaths,
   uploadPreparedOrderPhotos,
 } from './storage';
 
@@ -120,7 +121,8 @@ export async function createInventoryItem(
   values: InventoryFormValues,
   photoInput: NewPhotoInput | null,
   user: User,
-  settings: StoreSettings
+  settings: StoreSettings,
+  existingPhoto?: { url: string; path?: string } | null
 ): Promise<InventoryItem> {
   const validationError = validateInventoryForm(values);
   if (validationError) {
@@ -131,15 +133,18 @@ export async function createInventoryItem(
   const itemId = newRef.id;
   const teamEmails = buildTeamEmails(settings, user.email);
 
-  let photoUrl = '';
-  let photoPath = '';
+  let photoUrl = existingPhoto?.url?.trim() ?? '';
+  let photoPath =
+    existingPhoto?.path?.trim() ?? (photoUrl.startsWith('fsphoto:') ? photoUrl : '');
+  let uploadedNewPhoto = false;
 
-  if (photoInput) {
+  if (!photoUrl && photoInput) {
     const compressed = 'blob' in photoInput ? photoInput : await compressImageToTarget(photoInput);
     const uploaded = await uploadPreparedOrderPhotos(`inv_${itemId}`, [compressed], user, teamEmails);
     if (uploaded[0]) {
       photoUrl = uploaded[0].url;
       photoPath = uploaded[0].path;
+      uploadedNewPhoto = true;
     }
   }
 
@@ -167,7 +172,7 @@ export async function createInventoryItem(
       teamEmails,
     });
   } catch (error) {
-    if (photoPath) {
+    if (uploadedNewPhoto && photoPath) {
       await deleteStoragePaths([photoPath]);
     }
     handleFirestoreError(error, OperationType.CREATE, `inventory/${itemId}`);
@@ -200,7 +205,8 @@ export async function updateInventoryItem(
   newPhotoInput: NewPhotoInput | null,
   removedPhotoPath: string,
   user: User,
-  skipPhotoCleanup = false
+  allOrders: Order[] = [],
+  allInventory: InventoryItem[] = []
 ): Promise<void> {
   const validationError = validateInventoryForm(values);
   if (validationError) {
@@ -253,8 +259,24 @@ export async function updateInventoryItem(
     handleFirestoreError(error, OperationType.UPDATE, `inventory/${existingItem.id}`);
   }
 
-  if (!skipPhotoCleanup && removedPhotoPath && removedPhotoPath !== finalPhotoPath) {
-    void deleteStoragePaths([removedPhotoPath]);
+  if (
+    removedPhotoPath ||
+    (existingItem.photoUrl && existingItem.photoUrl !== finalPhotoUrl) ||
+    (existingItem.photoPath && existingItem.photoPath !== finalPhotoPath)
+  ) {
+    const remainingInv = allInventory.filter((inv) => inv.id !== existingItem.id);
+    const cleanupTargets = filterUnreferencedCleanupPaths(
+      [
+        { url: existingItem.photoUrl, path: existingItem.photoPath },
+        ...(removedPhotoPath ? [{ path: removedPhotoPath }] : []),
+      ],
+      allOrders,
+      remainingInv,
+      { urls: finalPhotoUrl ? [finalPhotoUrl] : [], paths: finalPhotoPath ? [finalPhotoPath] : [] }
+    );
+    if (cleanupTargets.length > 0) {
+      void deleteStoragePaths(cleanupTargets);
+    }
   }
 }
 
@@ -273,7 +295,8 @@ export async function adjustInventoryQuantity(itemId: string, nextQuantity: numb
 
 export async function deleteInventoryItem(
   item: InventoryItem,
-  skipPhotoCleanup = false
+  allOrders: Order[] = [],
+  allInventory: InventoryItem[] = []
 ): Promise<void> {
   const itemRef = doc(db, 'inventory', item.id);
   try {
@@ -281,7 +304,13 @@ export async function deleteInventoryItem(
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `inventory/${item.id}`);
   }
-  if (!skipPhotoCleanup && item.photoPath) {
-    await deleteStoragePaths([item.photoPath]);
+  const remainingInv = allInventory.filter((inv) => inv.id !== item.id);
+  const cleanupTargets = filterUnreferencedCleanupPaths(
+    [{ url: item.photoUrl, path: item.photoPath }],
+    allOrders,
+    remainingInv
+  );
+  if (cleanupTargets.length > 0) {
+    await deleteStoragePaths(cleanupTargets);
   }
 }
