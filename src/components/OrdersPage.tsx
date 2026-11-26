@@ -1,5 +1,6 @@
 import {
   Check,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -12,7 +13,11 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { getUserFriendlyError } from '../firebase/errors';
-import { updateOrderStatus } from '../services/orders';
+import {
+  getOrderLineItems,
+  markOrderPaidAndComplete,
+  updateOrderStatus,
+} from '../services/orders';
 import type {
   DateRangePreset,
   Order,
@@ -27,6 +32,7 @@ import {
   ORDER_STATUSES,
   PAYMENT_TYPE_OPTIONS,
   formatAmountDisplay,
+  parseAmountNumber,
 } from '../utils/payment';
 import { OrderPhoto } from './OrderPhoto';
 import { StatusBadge } from './StatusBadge';
@@ -99,7 +105,14 @@ export function OrdersPage({
   const availableSizes = useMemo(() => {
     const set = new Set<string>();
     for (const o of orders) {
-      if (o.size.trim()) set.add(o.size.trim());
+      const lineItems = getOrderLineItems(o);
+      if (lineItems.length > 0) {
+        for (const li of lineItems) {
+          if (li.size.trim()) set.add(li.size.trim());
+        }
+      } else if (o.size.trim()) {
+        set.add(o.size.trim());
+      }
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [orders]);
@@ -107,10 +120,26 @@ export function OrdersPage({
   const availableColors = useMemo(() => {
     const set = new Set<string>();
     for (const o of orders) {
-      if (o.color.trim()) set.add(o.color.trim());
+      const lineItems = getOrderLineItems(o);
+      if (lineItems.length > 0) {
+        for (const li of lineItems) {
+          if (li.color.trim()) set.add(li.color.trim());
+        }
+      } else if (o.color.trim()) {
+        set.add(o.color.trim());
+      }
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [orders]);
+
+  useEffect(() => {
+    if (filters.size !== 'ALL' && !availableSizes.includes(filters.size)) {
+      setFilters((f) => ({ ...f, size: 'ALL' }));
+    }
+    if (filters.color !== 'ALL' && !availableColors.includes(filters.color)) {
+      setFilters((f) => ({ ...f, color: 'ALL' }));
+    }
+  }, [filters.size, filters.color, availableSizes, availableColors]);
 
   const filteredOrders = useMemo(() => {
     const { start, end } = getDateRangeBounds(
@@ -122,15 +151,34 @@ export function OrdersPage({
     return orders.filter((order) => {
       if (filters.status !== 'ALL' && order.status !== filters.status) return false;
       if (filters.paymentType !== 'ALL' && order.paymentType !== filters.paymentType) return false;
-      if (filters.size !== 'ALL' && order.size !== filters.size) return false;
-      if (filters.color !== 'ALL' && order.color !== filters.color) return false;
+
+      const lineItems = getOrderLineItems(order);
+      if (filters.size !== 'ALL') {
+        const sizeMatch =
+          order.size === filters.size ||
+          lineItems.some((li) => li.size.trim() === filters.size);
+        if (!sizeMatch) return false;
+      }
+      if (filters.color !== 'ALL') {
+        const colorMatch =
+          order.color === filters.color ||
+          lineItems.some((li) => li.color.trim() === filters.color);
+        if (!colorMatch) return false;
+      }
 
       if (start && order.createdAt < start) return false;
       if (end && order.createdAt > end) return false;
 
       if (filters.search) {
         const q = filters.search;
+        const lineHit = getOrderLineItems(order).some(
+          (li) =>
+            li.productName.toLowerCase().includes(q) ||
+            li.size.toLowerCase().includes(q) ||
+            li.color.toLowerCase().includes(q)
+        );
         const hit =
+          lineHit ||
           order.orderNumber.toLowerCase().includes(q) ||
           order.customerName.toLowerCase().includes(q) ||
           order.phone.toLowerCase().includes(q) ||
@@ -171,10 +219,48 @@ export function OrdersPage({
     setStatusError(null);
     setUpdatingId(orderId);
     try {
-      await updateOrderStatus(orderId, nextStatus);
-      onNotify?.(`${orderNumber} updated to ${nextStatus}`);
+      const result = await updateOrderStatus(orderId, nextStatus);
+      const qtyHint =
+        typeof result.updatedStockQuantity === 'number'
+          ? ` (${result.updatedStockQuantity} left)`
+          : '';
+      const pieceHint = result.stockPieceLabel ? `${result.stockPieceLabel} ` : '';
+      const multiCount =
+        (result.stockUpdatesCount ?? 0) > 1 ? `${result.stockUpdatesCount} stock pieces ` : '';
+      const stockSuffix =
+        result.stockAction === 'restored'
+          ? ` · ${multiCount || pieceHint + 'stock '}restored${qtyHint}`
+          : result.stockAction === 'deducted'
+            ? ` · ${multiCount || pieceHint + 'stock '}deducted${qtyHint}`
+            : '';
+      onNotify?.(`${orderNumber} updated to ${nextStatus}${stockSuffix}`);
     } catch (err) {
       setStatusError(getUserFriendlyError(err, 'Could not update status.'));
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
+  async function handleQuickMarkPaid(e: React.MouseEvent, order: Order) {
+    e.stopPropagation();
+    setStatusError(null);
+    setUpdatingId(order.id);
+    try {
+      const result = await markOrderPaidAndComplete(order.id);
+      const qtyHint =
+        typeof result.updatedStockQuantity === 'number'
+          ? ` (${result.updatedStockQuantity} left)`
+          : '';
+      const pieceHint = result.stockPieceLabel ? `${result.stockPieceLabel} ` : '';
+      const multiCount =
+        (result.stockUpdatesCount ?? 0) > 1 ? `${result.stockUpdatesCount} stock pieces ` : '';
+      const stockSuffix =
+        result.stockAction === 'deducted'
+          ? ` · ${multiCount || pieceHint + 'stock '}deducted${qtyHint}`
+          : '';
+      onNotify?.(`${order.orderNumber} marked paid & completed${stockSuffix}`);
+    } catch (err) {
+      setStatusError(getUserFriendlyError(err, 'Could not settle payment.'));
     } finally {
       setUpdatingId(null);
     }
@@ -517,78 +603,115 @@ export function OrdersPage({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#ECE9E2] text-sm">
-                  {paginatedOrders.map((order) => (
-                    <tr
-                      key={order.id}
-                      onClick={() => onSelectOrder(order)}
-                      className="hover:bg-[#FAF9F5] transition-colors cursor-pointer"
-                    >
-                      <td className="py-3 px-4 font-mono text-xs font-semibold text-[#121211] whitespace-nowrap tabular-nums">
-                        <div className="inline-flex items-center gap-1.5">
-                          <span>{order.orderNumber}</span>
-                          <button
-                            type="button"
-                            onClick={(e) => handleCopyOrderNumber(e, order.orderNumber)}
-                            className="p-1 rounded text-[#8C877E] hover:text-[#121211] transition-colors cursor-pointer"
-                            aria-label={`Copy ${order.orderNumber}`}
-                          >
-                            {copiedOrderNum === order.orderNumber ? (
-                              <Check className="w-3 h-3 text-emerald-700" />
-                            ) : (
-                              <Copy className="w-3 h-3" />
-                            )}
-                          </button>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 font-medium text-[#121211] max-w-[170px] truncate">
-                        {order.customerName || '—'}
-                      </td>
-                      <td className="py-3 px-4 font-mono text-xs text-[#5C5852] whitespace-nowrap tabular-nums">
-                        {order.phone || '—'}
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-2.5 max-w-[220px]">
-                          <div className="w-9 h-9 rounded-lg overflow-hidden border border-[#E6E2D8] bg-[#F7F5F0] shrink-0 flex items-center justify-center">
-                            <OrderPhoto
-                              src={order.photos[0]}
-                              alt={order.productName || order.orderNumber}
-                              className="w-full h-full object-cover"
-                              iconClassName="w-3.5 h-3.5 text-[#8C877E]"
-                            />
+                  {paginatedOrders.map((order) => {
+                    const lineItems = getOrderLineItems(order);
+                    const totalQty =
+                      lineItems.length > 0
+                        ? lineItems.reduce((sum, li) => sum + li.quantity, 0)
+                        : order.orderQuantity;
+                    const hasDue =
+                      order.status !== 'CANCELLED' &&
+                      order.status !== 'RETURNED' &&
+                      parseAmountNumber(order.remainingAmount) > 0;
+                    const hasLinkedStock = lineItems.some((li) => Boolean(li.inventoryItemId));
+
+                    return (
+                      <tr
+                        key={order.id}
+                        onClick={() => onSelectOrder(order)}
+                        className="hover:bg-[#FAF9F5] transition-colors cursor-pointer"
+                      >
+                        <td className="py-3 px-4 font-mono text-xs font-semibold text-[#121211] whitespace-nowrap tabular-nums">
+                          <div className="inline-flex items-center gap-1.5">
+                            <span>{order.orderNumber}</span>
+                            <button
+                              type="button"
+                              onClick={(e) => handleCopyOrderNumber(e, order.orderNumber)}
+                              className="p-1 rounded text-[#8C877E] hover:text-[#121211] transition-colors cursor-pointer"
+                              aria-label={`Copy ${order.orderNumber}`}
+                            >
+                              {copiedOrderNum === order.orderNumber ? (
+                                <Check className="w-3 h-3 text-emerald-700" />
+                              ) : (
+                                <Copy className="w-3 h-3" />
+                              )}
+                            </button>
                           </div>
-                          <span className="truncate font-medium text-[#121211]">
-                            {order.productName || '—'}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 text-xs text-[#5C5852] whitespace-nowrap max-w-[90px] truncate">
-                        {order.size || '—'}
-                      </td>
-                      <td className="py-3 px-4 text-xs text-[#5C5852] whitespace-nowrap max-w-[100px] truncate">
-                        {order.color || '—'}
-                      </td>
-                      <td className="py-3 px-4 text-right font-mono text-xs font-semibold text-[#121211] whitespace-nowrap tabular-nums">
-                        {formatAmountDisplay(order.totalAmount, settings.currency)}
-                      </td>
-                      <td className="py-3 px-4 text-right font-mono text-xs text-emerald-800 whitespace-nowrap tabular-nums">
-                        {formatAmountDisplay(order.paidAmount, settings.currency)}
-                      </td>
-                      <td className="py-3 px-4 text-right font-mono text-xs text-amber-900 whitespace-nowrap tabular-nums">
-                        {formatAmountDisplay(order.remainingAmount, settings.currency)}
-                      </td>
-                      <td className="py-3 px-4 whitespace-nowrap">
-                        <StatusBadge
-                          status={order.status}
-                          compact
-                          disabled={updatingId === order.id}
-                          onChange={(next) => handleQuickStatus(order.orderNumber, order.id, next)}
-                        />
-                      </td>
-                      <td className="py-3 px-4 text-xs text-[#8C877E] whitespace-nowrap">
-                        {formatShortDate(order.createdAt)}
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="py-3 px-4 font-medium text-[#121211] max-w-[170px] truncate">
+                          {order.customerName || '—'}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-xs text-[#5C5852] whitespace-nowrap tabular-nums">
+                          {order.phone || '—'}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2.5 max-w-[240px]">
+                            <div className="w-9 h-9 rounded-lg overflow-hidden border border-[#E6E2D8] bg-[#F7F5F0] shrink-0 flex items-center justify-center">
+                              <OrderPhoto
+                                src={order.photos[0]}
+                                alt={order.productName || order.orderNumber}
+                                className="w-full h-full object-cover"
+                                iconClassName="w-3.5 h-3.5 text-[#8C877E]"
+                              />
+                            </div>
+                            <div className="min-w-0">
+                              <span className="block truncate font-medium text-[#121211]">
+                                {order.productName || '—'}
+                                {totalQty > 1 ? ` · ${totalQty} pcs` : ''}
+                              </span>
+                              {hasLinkedStock && (
+                                <span className="block text-[11px] text-[#8C877E]">
+                                  {order.stockDeducted ? 'Stock synced' : 'Stock restored'}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-xs text-[#5C5852] whitespace-nowrap max-w-[90px] truncate">
+                          {order.size || '—'}
+                        </td>
+                        <td className="py-3 px-4 text-xs text-[#5C5852] whitespace-nowrap max-w-[100px] truncate">
+                          {order.color || '—'}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono text-xs font-semibold text-[#121211] whitespace-nowrap tabular-nums">
+                          {formatAmountDisplay(order.totalAmount, settings.currency)}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono text-xs text-emerald-800 whitespace-nowrap tabular-nums">
+                          {formatAmountDisplay(order.paidAmount, settings.currency)}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono text-xs text-amber-900 whitespace-nowrap tabular-nums">
+                          {formatAmountDisplay(order.remainingAmount, settings.currency)}
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <StatusBadge
+                              status={order.status}
+                              compact
+                              disabled={updatingId === order.id}
+                              onChange={(next) =>
+                                handleQuickStatus(order.orderNumber, order.id, next)
+                              }
+                            />
+                            {hasDue && (
+                              <button
+                                type="button"
+                                disabled={updatingId === order.id}
+                                onClick={(e) => handleQuickMarkPaid(e, order)}
+                                title="Mark COD paid & complete order"
+                                className="min-h-[28px] px-2 py-1 rounded-lg border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-[11px] font-semibold text-emerald-900 inline-flex items-center gap-1 transition-colors cursor-pointer"
+                              >
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>Mark Paid</span>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-xs text-[#8C877E] whitespace-nowrap">
+                          {formatShortDate(order.createdAt)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -597,6 +720,17 @@ export function OrdersPage({
           {/* Mobile & Tablet Order Cards */}
           <div className="lg:hidden space-y-3">
             {paginatedOrders.map((order) => {
+              const lineItems = getOrderLineItems(order);
+              const totalQty =
+                lineItems.length > 0
+                  ? lineItems.reduce((sum, li) => sum + li.quantity, 0)
+                  : order.orderQuantity;
+              const hasDue =
+                order.status !== 'CANCELLED' &&
+                order.status !== 'RETURNED' &&
+                parseAmountNumber(order.remainingAmount) > 0;
+              const hasLinkedStock = lineItems.some((li) => Boolean(li.inventoryItemId));
+
               const specs = [
                 order.size ? `Size ${order.size}` : '',
                 order.color || '',
@@ -649,13 +783,20 @@ export function OrdersPage({
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-[#121211] truncate">
                         {order.productName || 'Untitled piece'}
+                        {totalQty > 1 ? ` · ${totalQty} pcs` : ''}
                       </p>
                       {specs && (
                         <p className="text-xs text-[#5C5852] truncate mt-0.5">{specs}</p>
                       )}
-                      {order.phone && (
-                        <p className="text-xs font-mono text-[#8C877E] tabular-nums mt-0.5">
-                          {order.phone}
+                      {(order.phone || hasLinkedStock) && (
+                        <p className="text-xs text-[#8C877E] mt-0.5 truncate">
+                          {order.phone && (
+                            <span className="font-mono tabular-nums">{order.phone}</span>
+                          )}
+                          {order.phone && hasLinkedStock && ' · '}
+                          {hasLinkedStock && (
+                            <span>{order.stockDeducted ? 'Stock synced' : 'Stock restored'}</span>
+                          )}
                         </p>
                       )}
                     </div>
@@ -681,6 +822,18 @@ export function OrdersPage({
                       </p>
                     </div>
                   </div>
+
+                  {hasDue && (
+                    <button
+                      type="button"
+                      disabled={updatingId === order.id}
+                      onClick={(e) => handleQuickMarkPaid(e, order)}
+                      className="w-full min-h-[38px] px-3 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-xs font-semibold text-emerald-900 inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Mark Paid & Complete</span>
+                    </button>
+                  )}
                 </div>
               );
             })}

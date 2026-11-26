@@ -1,6 +1,8 @@
-import { Download } from 'lucide-react';
+import { Download, Package } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { DateRangePreset, Order, StoreSettings } from '../types/order';
+import { getStockState } from '../services/inventory';
+import { getOrderLineItems } from '../services/orders';
+import type { DateRangePreset, InventoryItem, Order, StoreSettings } from '../types/order';
 import { downloadOrdersCsv } from '../utils/csv';
 import { DATE_PRESET_LABELS, getDateRangeBounds } from '../utils/date';
 import {
@@ -12,6 +14,7 @@ import {
 
 interface ReportsPageProps {
   orders: Order[];
+  inventory: InventoryItem[];
   settings: StoreSettings;
   onNotify?: (text: string) => void;
 }
@@ -26,7 +29,7 @@ const REPORT_PRESETS: DateRangePreset[] = [
   'all',
 ];
 
-export function ReportsPage({ orders, settings, onNotify }: ReportsPageProps) {
+export function ReportsPage({ orders, inventory, settings, onNotify }: ReportsPageProps) {
   const [datePreset, setDatePreset] = useState<DateRangePreset>('this_month');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
@@ -129,21 +132,82 @@ export function ReportsPage({ orders, settings, onNotify }: ReportsPageProps) {
     const map = new Map<string, { name: string; count: number; sales: number }>();
     for (const o of scopedOrders) {
       if (o.status === 'CANCELLED' || o.status === 'RETURNED') continue;
-      const displayName = o.productName.trim() || 'Untitled piece';
-      const key = displayName.toLowerCase();
+      const lineItems = getOrderLineItems(o);
       const orderTotal = parseAmountNumber(o.totalAmount);
-      const existing = map.get(key);
-      if (existing) {
-        existing.count += 1;
-        existing.sales += orderTotal;
+
+      if (lineItems.length <= 1) {
+        const displayName =
+          lineItems[0]?.productName.trim() || o.productName.trim() || 'Untitled piece';
+        const key = displayName.toLowerCase();
+        const qty = lineItems[0]?.quantity ?? Math.max(1, o.orderQuantity || 1);
+        const existing = map.get(key);
+        if (existing) {
+          existing.count += qty;
+          existing.sales += orderTotal;
+        } else {
+          map.set(key, { name: displayName, count: qty, sales: orderTotal });
+        }
       } else {
-        map.set(key, { name: displayName, count: 1, sales: orderTotal });
+        const linePriceSum = lineItems.reduce(
+          (sum, li) => sum + parseAmountNumber(li.unitPrice) * li.quantity,
+          0
+        );
+        for (const li of lineItems) {
+          const displayName = li.productName.trim() || 'Untitled piece';
+          const key = displayName.toLowerCase();
+          const lineValue =
+            linePriceSum > 0
+              ? (parseAmountNumber(li.unitPrice) * li.quantity / linePriceSum) * orderTotal
+              : orderTotal / lineItems.length;
+          const existing = map.get(key);
+          if (existing) {
+            existing.count += li.quantity;
+            existing.sales += lineValue;
+          } else {
+            map.set(key, { name: displayName, count: li.quantity, sales: lineValue });
+          }
+        }
       }
     }
     return Array.from(map.values())
       .sort((a, b) => b.sales - a.sales)
       .slice(0, 10);
   }, [scopedOrders]);
+
+  const inventoryReport = useMemo(() => {
+    let totalUnits = 0;
+    let estimatedValue = 0;
+    let lowOrOutCount = 0;
+    let linkedUnitsOrdered = 0;
+
+    for (const item of inventory) {
+      totalUnits += item.quantity;
+      const unitVal = parseAmountNumber(item.unitPrice);
+      if (unitVal > 0 && item.quantity > 0) {
+        estimatedValue += unitVal * item.quantity;
+      }
+      if (getStockState(item) !== 'ok') {
+        lowOrOutCount += 1;
+      }
+    }
+
+    for (const o of scopedOrders) {
+      if (o.status === 'CANCELLED' || o.status === 'RETURNED') continue;
+      for (const li of getOrderLineItems(o)) {
+        if (li.inventoryItemId) {
+          linkedUnitsOrdered += li.quantity;
+        }
+      }
+    }
+
+    return {
+      totalSkus: inventory.length,
+      totalUnits,
+      estimatedValue,
+      lowOrOutCount,
+      linkedUnitsOrdered,
+    };
+  }, [inventory, scopedOrders]);
 
   return (
     <div className="space-y-6">
@@ -380,7 +444,7 @@ export function ReportsPage({ orders, settings, onNotify }: ReportsPageProps) {
                   <div className="min-w-0">
                     <p className="font-medium text-[#121211] truncate">{prod.name}</p>
                     <p className="text-xs text-[#8C877E] tabular-nums">
-                      {prod.count} {prod.count === 1 ? 'order' : 'orders'}
+                      {prod.count} {prod.count === 1 ? 'pc' : 'pcs'}
                     </p>
                   </div>
                   <span className="font-mono text-xs sm:text-sm font-semibold text-[#121211] tabular-nums shrink-0">
@@ -392,6 +456,52 @@ export function ReportsPage({ orders, settings, onNotify }: ReportsPageProps) {
           )}
         </section>
       </div>
+
+      {/* Inventory Valuation & Movement */}
+      <section className="bg-white border border-[#E6E2D8] rounded-2xl p-5 sm:p-6 space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Package className="w-4 h-4 text-[#5C5852]" />
+            <h2 className="text-base font-semibold text-[#121211]">
+              Inventory Valuation & Stock Movement
+            </h2>
+          </div>
+          <span className="text-xs text-[#8C877E] tabular-nums">
+            {inventoryReport.totalSkus} pieces tracked
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="rounded-xl border border-[#ECE9E2] bg-[#FAF9F5] p-3.5">
+            <p className="text-xs font-medium text-[#5C5852]">Units on Hand</p>
+            <p className="mt-1.5 text-lg sm:text-xl font-semibold font-mono tabular-nums text-[#121211]">
+              {inventoryReport.totalUnits}
+            </p>
+          </div>
+          <div className="rounded-xl border border-[#ECE9E2] bg-[#FAF9F5] p-3.5">
+            <p className="text-xs font-medium text-[#5C5852]">Estimated Stock Value</p>
+            <p className="mt-1.5 text-lg sm:text-xl font-semibold font-mono tabular-nums text-[#121211] truncate">
+              {formatCurrency(inventoryReport.estimatedValue, settings.currency)}
+            </p>
+          </div>
+          <div className="rounded-xl border border-[#ECE9E2] bg-[#FAF9F5] p-3.5">
+            <p className="text-xs font-medium text-[#5C5852]">Stock Units Ordered</p>
+            <p className="mt-1.5 text-lg sm:text-xl font-semibold font-mono tabular-nums text-emerald-800">
+              {inventoryReport.linkedUnitsOrdered}
+            </p>
+          </div>
+          <div className="rounded-xl border border-[#ECE9E2] bg-[#FAF9F5] p-3.5">
+            <p className="text-xs font-medium text-[#5C5852]">Low / Out of Stock</p>
+            <p
+              className={`mt-1.5 text-lg sm:text-xl font-semibold font-mono tabular-nums ${
+                inventoryReport.lowOrOutCount > 0 ? 'text-amber-800' : 'text-[#121211]'
+              }`}
+            >
+              {inventoryReport.lowOrOutCount}
+            </p>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

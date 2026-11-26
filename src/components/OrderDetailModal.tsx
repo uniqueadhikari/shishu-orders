@@ -1,24 +1,32 @@
 import {
   ArrowLeft,
   Check,
+  CheckCircle2,
   Copy,
   Edit3,
   Expand,
   Loader2,
   MessageSquare,
+  Package,
   Phone,
   Printer,
   Trash2,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { getUserFriendlyError } from '../firebase/errors';
-import { deleteOrder, updateOrderStatus } from '../services/orders';
-import type { Order, OrderStatus, StoreSettings } from '../types/order';
+import {
+  deleteOrder,
+  getOrderLineItems,
+  markOrderPaidAndComplete,
+  updateOrderStatus,
+} from '../services/orders';
+import type { InventoryItem, Order, OrderStatus, StoreSettings } from '../types/order';
 import { formatDateTime } from '../utils/date';
 import {
   PAYMENT_TYPE_LABELS,
   formatAmountDisplay,
   hasAmountValue,
+  parseAmountNumber,
 } from '../utils/payment';
 import { ImageLightbox } from './ImageLightbox';
 import { OrderPhoto } from './OrderPhoto';
@@ -26,10 +34,12 @@ import { StatusBadge } from './StatusBadge';
 
 interface OrderDetailModalProps {
   order: Order;
+  inventory: InventoryItem[];
   settings: StoreSettings;
   onClose: () => void;
   onEdit: (order: Order) => void;
-  onDeleted: () => void;
+  onDeleted: (stockRestored?: boolean, deletedOrderNumber?: string) => void;
+  onOpenInventory?: () => void;
   onNotify?: (text: string) => void;
 }
 
@@ -44,14 +54,17 @@ const PIPELINE_STEPS: OrderStatus[] = [
 
 export function OrderDetailModal({
   order,
+  inventory,
   settings,
   onClose,
   onEdit,
   onDeleted,
+  onOpenInventory,
   onNotify,
 }: OrderDetailModalProps) {
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
   const [statusBusy, setStatusBusy] = useState(false);
+  const [settlingPaid, setSettlingPaid] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [copiedDm, setCopiedDm] = useState(false);
@@ -59,14 +72,66 @@ export function OrderDetailModal({
   const [error, setError] = useState<string | null>(null);
 
   const currentStepIdx = PIPELINE_STEPS.indexOf(order.status);
+  const lineItems = useMemo(() => getOrderLineItems(order), [order]);
+  const totalUnitQty = useMemo(
+    () =>
+      lineItems.length > 0
+        ? lineItems.reduce((sum, item) => sum + item.quantity, 0)
+        : order.orderQuantity || 1,
+    [lineItems, order.orderQuantity]
+  );
+
+  const connectedStockEntries = useMemo(() => {
+    const map = new Map<string, { qty: number; deducted: boolean }>();
+    for (const li of lineItems) {
+      if (!li.inventoryItemId) continue;
+      const prev = map.get(li.inventoryItemId);
+      map.set(li.inventoryItemId, {
+        qty: (prev?.qty ?? 0) + li.quantity,
+        deducted: Boolean(prev?.deducted || li.stockDeducted),
+      });
+    }
+    return Array.from(map.entries()).map(([id, info]) => ({
+      id,
+      qty: info.qty,
+      deducted: info.deducted,
+      item: inventory.find((inv) => inv.id === id) ?? null,
+    }));
+  }, [lineItems, inventory]);
+
+  const totalNum = parseAmountNumber(order.totalAmount);
+  const paidNum = parseAmountNumber(order.paidAmount);
+  const hasRemainingBalance =
+    parseAmountNumber(order.remainingAmount) > 0 ||
+    (hasAmountValue(order.totalAmount) &&
+      (totalNum > 0
+        ? paidNum + 0.001 < totalNum
+        : String(order.paidAmount).trim() !== String(order.totalAmount).trim()));
+  const canSettlePaidAndComplete =
+    order.status !== 'CANCELLED' &&
+    order.status !== 'RETURNED' &&
+    (hasRemainingBalance || order.status !== 'COMPLETED');
 
   async function handleStatusChange(nextStatus: OrderStatus) {
     if (nextStatus === order.status) return;
     setError(null);
     setStatusBusy(true);
     try {
-      await updateOrderStatus(order.id, nextStatus);
-      onNotify?.(`${order.orderNumber} updated to ${nextStatus}`);
+      const result = await updateOrderStatus(order.id, nextStatus);
+      const qtyHint =
+        typeof result.updatedStockQuantity === 'number'
+          ? ` (${result.updatedStockQuantity} left)`
+          : '';
+      const pieceHint = result.stockPieceLabel ? `${result.stockPieceLabel} ` : '';
+      const multiCount =
+        (result.stockUpdatesCount ?? 0) > 1 ? `${result.stockUpdatesCount} stock pieces ` : '';
+      const stockSuffix =
+        result.stockAction === 'restored'
+          ? ` · ${multiCount || pieceHint + 'stock '}restored${qtyHint}`
+          : result.stockAction === 'deducted'
+            ? ` · ${multiCount || pieceHint + 'stock '}deducted${qtyHint}`
+            : '';
+      onNotify?.(`${order.orderNumber} updated to ${nextStatus}${stockSuffix}`);
     } catch (err) {
       setError(getUserFriendlyError(err, 'Could not update status.'));
     } finally {
@@ -74,12 +139,37 @@ export function OrderDetailModal({
     }
   }
 
+  async function handleMarkPaidAndComplete() {
+    setError(null);
+    setSettlingPaid(true);
+    try {
+      const result = await markOrderPaidAndComplete(order.id);
+      const qtyHint =
+        typeof result.updatedStockQuantity === 'number'
+          ? ` (${result.updatedStockQuantity} left)`
+          : '';
+      const pieceHint = result.stockPieceLabel ? `${result.stockPieceLabel} ` : '';
+      const multiCount =
+        (result.stockUpdatesCount ?? 0) > 1 ? `${result.stockUpdatesCount} stock pieces ` : '';
+      const stockSuffix =
+        result.stockAction === 'deducted'
+          ? ` · ${multiCount || pieceHint + 'stock '}deducted${qtyHint}`
+          : '';
+      onNotify?.(`${order.orderNumber} marked paid & completed${stockSuffix}`);
+    } catch (err) {
+      setError(getUserFriendlyError(err, 'Could not settle payment.'));
+    } finally {
+      setSettlingPaid(false);
+    }
+  }
+
   async function handleConfirmDelete() {
     setError(null);
     setDeleting(true);
     try {
-      await deleteOrder(order);
-      onDeleted();
+      const orderNum = order.orderNumber;
+      const result = await deleteOrder(order);
+      onDeleted(result.stockRestored, orderNum);
     } catch (err) {
       setError(getUserFriendlyError(err, 'Could not delete this order.'));
       setDeleting(false);
@@ -89,21 +179,35 @@ export function OrderDetailModal({
 
   async function handleCopyDmSummary() {
     const brand = settings.brandName || 'Shishu.clo';
-    const pieceDetails = [
-      order.size ? `Size ${order.size}` : '',
-      order.color || '',
-    ]
-      .filter(Boolean)
-      .join(' · ');
+    const pieceLines =
+      lineItems.length > 1
+        ? lineItems.map((li, idx) => {
+            const specs = [li.size ? `Size ${li.size}` : '', li.color || '']
+              .filter(Boolean)
+              .join(' · ');
+            return `${idx + 1}. ${li.productName || 'Piece'}${specs ? ` (${specs})` : ''} ×${li.quantity}`;
+          })
+        : [
+            (() => {
+              const pieceDetails = [
+                order.size ? `Size ${order.size}` : '',
+                order.color || '',
+              ]
+                .filter(Boolean)
+                .join(' · ');
+              if (order.productName) {
+                return `Piece: ${order.productName}${totalUnitQty > 1 ? ` ×${totalUnitQty}` : ''}${pieceDetails ? ` (${pieceDetails})` : ''}`;
+              }
+              return pieceDetails
+                ? `Details: ${pieceDetails}${totalUnitQty > 1 ? ` ×${totalUnitQty}` : ''}`
+                : '';
+            })(),
+          ];
 
     const lines = [
       `Thank you for ordering with ${brand}!`,
       `Order: ${order.orderNumber}`,
-      order.productName
-        ? `Piece: ${order.productName}${pieceDetails ? ` (${pieceDetails})` : ''}`
-        : pieceDetails
-          ? `Details: ${pieceDetails}`
-          : '',
+      ...pieceLines,
       hasAmountValue(order.totalAmount)
         ? `Total: ${formatAmountDisplay(order.totalAmount, settings.currency)}`
         : '',
@@ -185,6 +289,22 @@ export function OrderDetailModal({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {canSettlePaidAndComplete && (
+            <button
+              type="button"
+              disabled={settlingPaid || statusBusy}
+              onClick={handleMarkPaidAndComplete}
+              className="min-h-[42px] px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs sm:text-sm font-medium inline-flex items-center gap-1.5 transition-colors disabled:opacity-60 cursor-pointer"
+            >
+              {settlingPaid ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4" />
+              )}
+              <span>{hasRemainingBalance ? 'Mark Paid & Complete' : 'Mark Completed'}</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handleCopyDmSummary}
@@ -347,7 +467,7 @@ export function OrderDetailModal({
               </div>
             )}
 
-            <div className="pt-3 border-t border-[#ECE9E2] grid grid-cols-2 gap-4 text-sm">
+            <div className="pt-3 border-t border-[#ECE9E2] grid grid-cols-3 gap-4 text-sm">
               <div>
                 <p className="text-xs text-[#8C877E]">Size</p>
                 <p className="font-medium text-[#121211] mt-0.5">{order.size || '—'}</p>
@@ -356,7 +476,61 @@ export function OrderDetailModal({
                 <p className="text-xs text-[#8C877E]">Color</p>
                 <p className="font-medium text-[#121211] mt-0.5">{order.color || '—'}</p>
               </div>
+              <div>
+                <p className="text-xs text-[#8C877E]">Total Units</p>
+                <p className="font-mono font-medium text-[#121211] tabular-nums mt-0.5">
+                  {totalUnitQty}
+                  {connectedStockEntries.length > 0 && (
+                    <span className="block text-[11px] font-sans text-[#5C5852]">
+                      {order.stockDeducted ? 'Deducted from stock' : 'Stock not deducted'}
+                    </span>
+                  )}
+                </p>
+              </div>
             </div>
+
+            {lineItems.length > 1 && (
+              <div className="pt-3 border-t border-[#ECE9E2] space-y-2">
+                <p className="text-xs font-medium text-[#8C877E]">
+                  Pieces in this order ({lineItems.length})
+                </p>
+                <div className="divide-y divide-[#ECE9E2] border border-[#E6E2D8] rounded-xl overflow-hidden bg-[#FAF9F5]">
+                  {lineItems.map((li, idx) => (
+                    <div
+                      key={`${li.productName}-${li.color}-${idx}`}
+                      className="px-3.5 py-2.5 flex items-center justify-between gap-3 text-sm"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-medium text-[#121211] truncate">
+                          {idx + 1}. {li.productName || 'Untitled piece'}
+                        </p>
+                        <p className="text-xs text-[#5C5852] truncate">
+                          {[
+                            li.color,
+                            li.size ? `Size ${li.size}` : '',
+                            li.inventoryItemId
+                              ? li.stockDeducted
+                                ? 'Stock deducted'
+                                : 'Stock restored'
+                              : 'Custom piece',
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0 font-mono text-xs tabular-nums">
+                        <p className="font-semibold text-[#121211]">×{li.quantity}</p>
+                        {li.unitPrice && (
+                          <p className="text-[#5C5852]">
+                            {formatAmountDisplay(li.unitPrice, settings.currency)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {order.notes && (
               <div className="pt-3 border-t border-[#ECE9E2]">
@@ -456,7 +630,98 @@ export function OrderDetailModal({
                 </span>
               </div>
             </div>
+
+            {canSettlePaidAndComplete && (
+              <button
+                type="button"
+                disabled={settlingPaid || statusBusy}
+                onClick={handleMarkPaidAndComplete}
+                className="no-print mt-2 w-full min-h-[42px] px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs sm:text-sm font-medium inline-flex items-center justify-center gap-2 transition-colors disabled:opacity-60 cursor-pointer"
+              >
+                {settlingPaid ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4" />
+                )}
+                <span>
+                  {hasRemainingBalance
+                    ? 'Settle Remaining COD & Complete'
+                    : 'Mark Order Completed'}
+                </span>
+              </button>
+            )}
           </div>
+
+          {connectedStockEntries.length > 0 && (
+            <div className="no-print bg-white border border-[#E6E2D8] rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Package className="w-4 h-4 text-[#5C5852]" />
+                  <h3 className="text-sm font-semibold text-[#121211]">
+                    Connected Inventory ({connectedStockEntries.length})
+                  </h3>
+                </div>
+                {onOpenInventory && (
+                  <button
+                    type="button"
+                    onClick={onOpenInventory}
+                    className="text-xs font-medium text-[#5C5852] hover:text-[#121211] underline underline-offset-2 cursor-pointer"
+                  >
+                    Open Inventory
+                  </button>
+                )}
+              </div>
+
+              <div className="divide-y divide-[#ECE9E2] space-y-2.5">
+                {connectedStockEntries.map(({ id, qty, deducted, item }) =>
+                  item ? (
+                    <div key={id} className="flex items-center gap-3 pt-2 first:pt-0">
+                      <div className="w-11 h-11 rounded-xl overflow-hidden border border-[#E6E2D8] bg-[#F7F5F0] shrink-0 flex items-center justify-center">
+                        <OrderPhoto
+                          src={item.photoUrl}
+                          alt={item.pieceName}
+                          className="w-full h-full object-cover"
+                          iconClassName="w-4 h-4 text-[#8C877E]"
+                        />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-[#121211] truncate">
+                          {item.pieceName}
+                        </p>
+                        <p className="text-xs text-[#5C5852] truncate">
+                          {[item.color || 'No color', item.size ? `Size ${item.size}` : '']
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </p>
+                        <p className="text-xs mt-1 font-mono tabular-nums">
+                          <span
+                            className={
+                              item.quantity <= 0
+                                ? 'text-rose-700 font-semibold'
+                                : item.quantity <= item.lowStockThreshold
+                                  ? 'text-amber-800 font-semibold'
+                                  : 'text-emerald-800 font-semibold'
+                            }
+                          >
+                            {item.quantity} in stock now
+                          </span>
+                          <span className="text-[#8C877E] font-sans">
+                            {' '}
+                            · {deducted ? `Deducted ×${qty}` : 'Restored / not deducted'}
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <p key={id} className="text-xs text-[#8C877E] pt-2 first:pt-0">
+                      Stock piece removed from inventory (
+                      {deducted ? `deducted ×${qty}` : 'restored / not deducted'}).
+                    </p>
+                  )
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

@@ -1,8 +1,21 @@
-import { ArrowRight, ArrowUpRight, Plus, Shirt } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowRight,
+  ArrowUpRight,
+  CheckCircle2,
+  Package,
+  Plus,
+  Shirt,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { getUserFriendlyError } from '../firebase/errors';
-import { updateOrderStatus } from '../services/orders';
-import type { Order, OrderStatus, StoreSettings } from '../types/order';
+import { adjustInventoryQuantity, getStockState } from '../services/inventory';
+import {
+  getOrderLineItems,
+  markOrderPaidAndComplete,
+  updateOrderStatus,
+} from '../services/orders';
+import type { InventoryItem, Order, OrderStatus, StoreSettings } from '../types/order';
 import { formatShortDate, isTodayDate } from '../utils/date';
 import { formatAmountDisplay, formatCurrency, parseAmountNumber } from '../utils/payment';
 import { OrderPhoto } from './OrderPhoto';
@@ -10,24 +23,31 @@ import { StatusBadge } from './StatusBadge';
 
 interface DashboardPageProps {
   orders: Order[];
+  inventory: InventoryItem[];
   loading: boolean;
   settings: StoreSettings;
   onNewOrder: () => void;
+  onOrderFromStock?: (item: InventoryItem) => void;
   onSelectOrder: (order: Order) => void;
   onViewAllOrders: (statusFilter?: OrderStatus) => void;
+  onOpenInventory: () => void;
   onNotify?: (text: string) => void;
 }
 
 export function DashboardPage({
   orders,
+  inventory,
   loading,
   settings,
   onNewOrder,
+  onOrderFromStock,
   onSelectOrder,
   onViewAllOrders,
+  onOpenInventory,
   onNotify,
 }: DashboardPageProps) {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [restockingId, setRestockingId] = useState<string | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
 
   const metrics = useMemo(() => {
@@ -84,18 +104,88 @@ export function DashboardPage({
     };
   }, [orders]);
 
+  const stockMetrics = useMemo(() => {
+    let totalUnits = 0;
+    const alertItems: InventoryItem[] = [];
+    for (const item of inventory) {
+      totalUnits += item.quantity;
+      const state = getStockState(item);
+      if (state === 'low' || state === 'out') {
+        alertItems.push(item);
+      }
+    }
+    alertItems.sort((a, b) => a.quantity - b.quantity);
+    return {
+      totalSkus: inventory.length,
+      totalUnits,
+      alertItems: alertItems.slice(0, 4),
+      totalAlerts: alertItems.length,
+    };
+  }, [inventory]);
+
   const recentOrders = useMemo(() => orders.slice(0, 8), [orders]);
 
   async function handleQuickStatus(orderNumber: string, orderId: string, nextStatus: OrderStatus) {
     setStatusError(null);
     setUpdatingId(orderId);
     try {
-      await updateOrderStatus(orderId, nextStatus);
-      onNotify?.(`${orderNumber} marked ${nextStatus}`);
+      const result = await updateOrderStatus(orderId, nextStatus);
+      const qtyHint =
+        typeof result.updatedStockQuantity === 'number'
+          ? ` (${result.updatedStockQuantity} left)`
+          : '';
+      const pieceHint = result.stockPieceLabel ? `${result.stockPieceLabel} ` : '';
+      const multiCount =
+        (result.stockUpdatesCount ?? 0) > 1 ? `${result.stockUpdatesCount} stock pieces ` : '';
+      const stockSuffix =
+        result.stockAction === 'restored'
+          ? ` · ${multiCount || pieceHint + 'stock '}restored${qtyHint}`
+          : result.stockAction === 'deducted'
+            ? ` · ${multiCount || pieceHint + 'stock '}deducted${qtyHint}`
+            : '';
+      onNotify?.(`${orderNumber} marked ${nextStatus}${stockSuffix}`);
     } catch (err) {
       setStatusError(getUserFriendlyError(err, 'Could not update order status.'));
     } finally {
       setUpdatingId(null);
+    }
+  }
+
+  async function handleQuickMarkPaid(e: React.MouseEvent, order: Order) {
+    e.stopPropagation();
+    setStatusError(null);
+    setUpdatingId(order.id);
+    try {
+      const result = await markOrderPaidAndComplete(order.id);
+      const qtyHint =
+        typeof result.updatedStockQuantity === 'number'
+          ? ` (${result.updatedStockQuantity} left)`
+          : '';
+      const pieceHint = result.stockPieceLabel ? `${result.stockPieceLabel} ` : '';
+      const multiCount =
+        (result.stockUpdatesCount ?? 0) > 1 ? `${result.stockUpdatesCount} stock pieces ` : '';
+      const stockSuffix =
+        result.stockAction === 'deducted'
+          ? ` · ${multiCount || pieceHint + 'stock '}deducted${qtyHint}`
+          : '';
+      onNotify?.(`${order.orderNumber} marked paid & completed${stockSuffix}`);
+    } catch (err) {
+      setStatusError(getUserFriendlyError(err, 'Could not settle payment.'));
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
+  async function handleQuickRestock(item: InventoryItem) {
+    setStatusError(null);
+    setRestockingId(item.id);
+    try {
+      await adjustInventoryQuantity(item.id, item.quantity + 1);
+      onNotify?.(`Added +1 stock for ${item.pieceName}`);
+    } catch (err) {
+      setStatusError(getUserFriendlyError(err, 'Could not update stock.'));
+    } finally {
+      setRestockingId(null);
     }
   }
 
@@ -169,7 +259,8 @@ export function DashboardPage({
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
           <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[#8C877E]">
-            {formatShortDate(new Date())} · {orders.length} {orders.length === 1 ? 'order' : 'orders'}
+            {formatShortDate(new Date())} · {orders.length}{' '}
+            {orders.length === 1 ? 'order' : 'orders'} · {stockMetrics.totalUnits} in stock
           </p>
           <h1 className="mt-1 text-3xl sm:text-4xl font-display font-semibold tracking-tight text-[#121211]">
             Studio Overview
@@ -274,6 +365,104 @@ export function DashboardPage({
         )}
       </section>
 
+      {/* Inventory & Stock Alerts Snapshot */}
+      <section className="bg-white border border-[#E6E2D8] rounded-2xl overflow-hidden">
+        <div className="px-5 py-4 border-b border-[#ECE9E2] flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <Package className="w-4 h-4 text-[#5C5852]" />
+            <h2 className="text-base font-semibold text-[#121211]">Inventory Snapshot</h2>
+            <span className="text-xs text-[#8C877E] tabular-nums">
+              · {stockMetrics.totalSkus} pieces · {stockMetrics.totalUnits} units
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenInventory}
+            className="min-h-[38px] px-2.5 text-xs sm:text-sm font-medium text-[#5C5852] hover:text-[#121211] inline-flex items-center gap-1 transition-colors cursor-pointer"
+          >
+            <span>Manage stock</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {inventory.length === 0 ? (
+          <div className="px-5 py-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <p className="text-sm text-[#5C5852]">
+              Add your pieces, colors, and quantities to track stock automatically when orders come
+              in.
+            </p>
+            <button
+              type="button"
+              onClick={onOpenInventory}
+              className="min-h-[40px] px-4 py-2 rounded-xl border border-[#DDD8CE] bg-[#FAF9F5] hover:bg-[#EFECE5] text-xs font-medium text-[#121211] whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              Open Inventory
+            </button>
+          </div>
+        ) : stockMetrics.alertItems.length === 0 ? (
+          <div className="px-5 py-4 text-sm text-emerald-900 flex items-center justify-between gap-3">
+            <span>All {stockMetrics.totalSkus} stock pieces are healthy and ready for orders.</span>
+          </div>
+        ) : (
+          <div className="divide-y divide-[#ECE9E2]">
+            {stockMetrics.alertItems.map((item) => {
+              const out = item.quantity <= 0;
+              return (
+                <div
+                  key={item.id}
+                  className="px-4 sm:px-5 py-3 flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-lg overflow-hidden border border-[#E6E2D8] bg-[#F7F5F0] shrink-0 flex items-center justify-center">
+                      <OrderPhoto
+                        src={item.photoUrl}
+                        alt={item.pieceName}
+                        className="w-full h-full object-cover"
+                        iconClassName="w-3.5 h-3.5 text-[#8C877E]"
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-[#121211] truncate">
+                        {item.pieceName}
+                        {item.color ? ` · ${item.color}` : ''}
+                      </p>
+                      <p
+                        className={`text-xs inline-flex items-center gap-1 ${
+                          out ? 'text-rose-700 font-semibold' : 'text-amber-800 font-medium'
+                        }`}
+                      >
+                        <AlertTriangle className="w-3 h-3" />
+                        <span>{out ? 'Out of stock' : `Low stock · ${item.quantity} left`}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {!out && onOrderFromStock && (
+                      <button
+                        type="button"
+                        onClick={() => onOrderFromStock(item)}
+                        className="min-h-[34px] px-3 py-1 rounded-lg bg-[#121211] text-[#F7F5F0] hover:bg-[#272624] text-xs font-medium cursor-pointer"
+                      >
+                        Order
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      disabled={restockingId === item.id}
+                      onClick={() => handleQuickRestock(item)}
+                      className="min-h-[34px] px-3 py-1 rounded-lg border border-[#DDD8CE] bg-[#FAF9F5] hover:bg-[#EFECE5] text-xs font-medium text-[#121211] cursor-pointer"
+                    >
+                      {restockingId === item.id ? 'Adding...' : '+1 Stock'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
       {/* Recent Orders */}
       <section className="bg-white border border-[#E6E2D8] rounded-2xl overflow-hidden">
         <div className="px-5 py-4 border-b border-[#ECE9E2] flex items-center justify-between gap-4">
@@ -319,8 +508,19 @@ export function DashboardPage({
         ) : (
           <div className="divide-y divide-[#ECE9E2]">
             {recentOrders.map((order) => {
+              const lineItems = getOrderLineItems(order);
+              const totalQty =
+                lineItems.length > 0
+                  ? lineItems.reduce((sum, li) => sum + li.quantity, 0)
+                  : order.orderQuantity;
+              const hasDue =
+                order.status !== 'CANCELLED' &&
+                order.status !== 'RETURNED' &&
+                parseAmountNumber(order.remainingAmount) > 0;
+
               const subtitleParts = [
                 order.productName || 'Untitled piece',
+                totalQty > 1 ? `${totalQty} pcs` : '',
                 order.size ? `Size ${order.size}` : '',
                 order.color || '',
               ].filter(Boolean);
@@ -359,7 +559,7 @@ export function DashboardPage({
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between sm:justify-end gap-4 pl-[62px] sm:pl-0 shrink-0">
+                  <div className="flex items-center justify-between sm:justify-end gap-3 pl-[62px] sm:pl-0 shrink-0 flex-wrap">
                     <div className="text-left sm:text-right">
                       <p className="text-sm font-semibold font-mono tabular-nums text-[#121211]">
                         {formatAmountDisplay(order.totalAmount, settings.currency)}
@@ -368,6 +568,19 @@ export function DashboardPage({
                         Paid {formatAmountDisplay(order.paidAmount, settings.currency)}
                       </p>
                     </div>
+
+                    {hasDue && (
+                      <button
+                        type="button"
+                        disabled={updatingId === order.id}
+                        onClick={(e) => handleQuickMarkPaid(e, order)}
+                        title="Mark COD paid & complete order"
+                        className="min-h-[32px] px-2.5 py-1 rounded-lg border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-[11px] font-semibold text-emerald-900 inline-flex items-center gap-1 transition-colors cursor-pointer"
+                      >
+                        <CheckCircle2 className="w-3 h-3" />
+                        <span>Mark Paid</span>
+                      </button>
+                    )}
 
                     <StatusBadge
                       status={order.status}

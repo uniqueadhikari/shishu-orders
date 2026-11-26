@@ -4,11 +4,12 @@ import { useEffect, useState } from 'react';
 import { OWNER_EMAIL } from '../firebase/config';
 import { getUserFriendlyError } from '../firebase/errors';
 import { saveStoreSettings } from '../services/settings';
-import type { Order, StoreSettings } from '../types/order';
+import type { InventoryItem, Order, StoreSettings } from '../types/order';
 
 interface SettingsPageProps {
   settings: StoreSettings;
   orders: Order[];
+  inventory: InventoryItem[];
   user: User;
   onSignOut: () => void;
   onNotify?: (text: string) => void;
@@ -17,6 +18,7 @@ interface SettingsPageProps {
 export function SettingsPage({
   settings,
   orders,
+  inventory,
   user,
   onSignOut,
   onNotify,
@@ -62,7 +64,8 @@ export function SettingsPage({
           partnerEmails,
         },
         user,
-        orders
+        orders,
+        inventory
       );
       setSavedBanner(true);
       onNotify?.('Studio settings saved and synced');

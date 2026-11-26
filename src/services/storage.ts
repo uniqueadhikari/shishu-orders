@@ -138,15 +138,20 @@ export async function compressImageToTarget(file: File): Promise<CompressedPhoto
 
     // Extra downscale guard for very dense images
     if (blob && blob.size > HARD_MAX_BYTES) {
-      const scale = 0.72;
-      canvas.width = Math.max(1, Math.round(canvas.width * scale));
-      canvas.height = Math.max(1, Math.round(canvas.height * scale));
-      const ctx2 = canvas.getContext('2d');
-      if (ctx2) {
-        source.draw(ctx2, canvas.width, canvas.height);
-        const smaller = await canvasToBlob(canvas, mime, 0.58);
-        if (smaller && smaller.size < blob.size) {
-          blob = smaller;
+      for (const pass of [
+        { scale: 0.72, quality: 0.58 },
+        { scale: 0.7, quality: 0.48 },
+      ]) {
+        if (!blob || blob.size <= HARD_MAX_BYTES) break;
+        canvas.width = Math.max(1, Math.round(canvas.width * pass.scale));
+        canvas.height = Math.max(1, Math.round(canvas.height * pass.scale));
+        const ctx2 = canvas.getContext('2d');
+        if (ctx2) {
+          source.draw(ctx2, canvas.width, canvas.height);
+          const smaller = await canvasToBlob(canvas, mime, pass.quality);
+          if (smaller && smaller.size < blob.size) {
+            blob = smaller;
+          }
         }
       }
     }

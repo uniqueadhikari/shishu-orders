@@ -3,6 +3,7 @@ import {
   ClipboardList,
   LayoutDashboard,
   LogOut,
+  Package,
   Plus,
   Settings,
 } from 'lucide-react';
@@ -16,6 +17,7 @@ interface LayoutProps {
   userEmail: string;
   brandName: string;
   activeOrderCount?: number;
+  lowStockCount?: number;
   onSignOut: () => void;
   children: ReactNode;
 }
@@ -23,6 +25,7 @@ interface LayoutProps {
 const NAV_ITEMS: { id: Exclude<AppView, 'new-order'>; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'orders', label: 'Orders', icon: ClipboardList },
+  { id: 'inventory', label: 'Inventory', icon: Package },
   { id: 'reports', label: 'Reports', icon: BarChart3 },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
@@ -34,6 +37,7 @@ export function Layout({
   userEmail,
   brandName,
   activeOrderCount = 0,
+  lowStockCount = 0,
   onSignOut,
   children,
 }: LayoutProps) {
@@ -62,7 +66,7 @@ export function Layout({
                 {displayBrand}
               </span>
               <span className="block text-[10px] font-medium uppercase tracking-[0.16em] text-[#8C877E] mt-1">
-                Order Manager
+                Stock & Orders
               </span>
             </div>
           </button>
@@ -98,6 +102,11 @@ export function Layout({
                   {item.id === 'orders' && activeOrderCount > 0 && (
                     <span className="font-mono text-[11px] font-semibold tabular-nums text-[#8C877E]">
                       {activeOrderCount}
+                    </span>
+                  )}
+                  {item.id === 'inventory' && lowStockCount > 0 && (
+                    <span className="font-mono text-[11px] font-semibold tabular-nums text-amber-800">
+                      {lowStockCount} low
                     </span>
                   )}
                 </button>
@@ -166,7 +175,7 @@ export function Layout({
         aria-label="Mobile navigation"
         className="no-print lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-[#E6E2D8] pb-safe"
       >
-        <div className="grid grid-cols-4 h-16">
+        <div className="grid grid-cols-5 h-16">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive = activeView === item.id;
@@ -181,12 +190,12 @@ export function Layout({
               >
                 {isActive && (
                   <span
-                    className="absolute top-0 inset-x-6 h-[2px] bg-[#121211] rounded-full"
+                    className="absolute top-0 inset-x-4 h-[2px] bg-[#121211] rounded-full"
                     aria-hidden="true"
                   />
                 )}
                 <Icon className="w-5 h-5" strokeWidth={isActive ? 2.2 : 1.75} />
-                <span className={`text-[11px] leading-none ${isActive ? 'font-semibold' : 'font-medium'}`}>
+                <span className={`text-[10px] leading-none ${isActive ? 'font-semibold' : 'font-medium'}`}>
                   {item.label}
                 </span>
               </button>

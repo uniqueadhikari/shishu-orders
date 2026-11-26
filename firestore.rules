@@ -30,13 +30,13 @@ service cloud.firestore {
     }
 
     function isBootstrappedAdmin() {
-      return isVerified() && request.auth.token.email == 'girimerina469@gmail.com';
+      return isVerified() && request.auth.token.email.lower() == 'girimerina469@gmail.com';
     }
 
     function isAuthorizedPartnerOnSettings() {
       return isVerified()
         && exists(/databases/$(database)/documents/settings/store)
-        && request.auth.token.email in get(/databases/$(database)/documents/settings/store).data.partnerEmails;
+        && request.auth.token.email.lower() in get(/databases/$(database)/documents/settings/store).data.partnerEmails;
     }
 
     function isTeamMember() {
@@ -63,6 +63,23 @@ service cloud.firestore {
         && (items.size() <= 2 || (items[2] is string && items[2].size() <= maxItemLen));
     }
 
+    function isValidOrderItem(item) {
+      return item is map
+        && item.keys().hasAll([
+          'inventoryItemId', 'productName', 'color', 'size', 'quantity', 'unitPrice', 'stockDeducted'
+        ])
+        && item.keys().hasOnly([
+          'inventoryItemId', 'productName', 'color', 'size', 'quantity', 'unitPrice', 'stockDeducted'
+        ])
+        && item.inventoryItemId is string && item.inventoryItemId.size() <= 128
+        && item.productName is string && item.productName.size() <= 160
+        && item.color is string && item.color.size() <= 60
+        && item.size is string && item.size.size() <= 60
+        && item.quantity is number && item.quantity >= 1 && item.quantity <= 10000
+        && item.unitPrice is string && item.unitPrice.size() <= 60
+        && item.stockDeducted is bool;
+    }
+
     function isValidOrder(data, orderId) {
       return data.keys().hasAll([
           'id', 'orderNumber', 'customerName', 'phone', 'platform', 'socialContact',
@@ -76,10 +93,11 @@ service cloud.firestore {
           'productName', 'photos', 'photoPaths', 'size', 'color', 'notes',
           'productAmount', 'deliveryCharge', 'deliveryArea', 'paymentType',
           'totalAmount', 'paidAmount', 'remainingAmount', 'status',
-          'createdAt', 'updatedAt', 'createdByUid', 'teamEmails'
+          'createdAt', 'updatedAt', 'createdByUid', 'teamEmails',
+          'inventoryItemId', 'orderQuantity', 'stockDeducted', 'items'
         ])
         && data.id is string && data.id == orderId && isValidId(data.id)
-        && data.orderNumber is string && data.orderNumber.size() >= 12 && data.orderNumber.size() <= 20 && data.orderNumber.matches('^SH-[0-9]{4}-[0-9]{4}$')
+        && data.orderNumber is string && data.orderNumber.size() >= 12 && data.orderNumber.size() <= 20 && data.orderNumber.matches('^SH-[0-9]{4}-[0-9]{4,8}$')
         && data.customerName is string && data.customerName.size() <= 120
         && data.phone is string && data.phone.size() <= 30
         && data.platform is string && data.platform in ['', 'TikTok', 'Instagram', 'WhatsApp']
@@ -98,6 +116,41 @@ service cloud.firestore {
         && isValidAmountField(data.paidAmount)
         && isValidAmountField(data.remainingAmount)
         && data.status is string && data.status in ['NEW', 'CONFIRMED', 'PROCESSING', 'READY', 'SHIPPED', 'COMPLETED', 'CANCELLED', 'RETURNED']
+        && (!('inventoryItemId' in data) || (data.inventoryItemId is string && data.inventoryItemId.size() <= 128))
+        && (!('orderQuantity' in data) || (data.orderQuantity is number && data.orderQuantity >= 1 && data.orderQuantity <= 10000))
+        && (!('stockDeducted' in data) || data.stockDeducted is bool)
+        && (!('items' in data) || (
+          data.items is list
+          && data.items.size() <= 15
+          && (data.items.size() == 0 || isValidOrderItem(data.items[0]))
+        ))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.createdByUid is string && data.createdByUid.size() >= 1 && data.createdByUid.size() <= 128
+        && isValidEmailList(data.teamEmails, 1, 5);
+    }
+
+    function isValidInventoryItem(data, itemId) {
+      return data.keys().hasAll([
+          'id', 'pieceName', 'color', 'size', 'quantity', 'lowStockThreshold',
+          'unitPrice', 'photoUrl', 'photoPath', 'notes',
+          'createdAt', 'updatedAt', 'createdByUid', 'teamEmails'
+        ])
+        && data.keys().hasOnly([
+          'id', 'pieceName', 'color', 'size', 'quantity', 'lowStockThreshold',
+          'unitPrice', 'photoUrl', 'photoPath', 'notes',
+          'createdAt', 'updatedAt', 'createdByUid', 'teamEmails'
+        ])
+        && data.id is string && data.id == itemId && isValidId(data.id)
+        && data.pieceName is string && data.pieceName.size() >= 1 && data.pieceName.size() <= 160
+        && data.color is string && data.color.size() <= 60
+        && data.size is string && data.size.size() <= 60
+        && data.quantity is number && data.quantity >= 0 && data.quantity <= 100000
+        && data.lowStockThreshold is number && data.lowStockThreshold >= 0 && data.lowStockThreshold <= 1000
+        && data.unitPrice is string && data.unitPrice.size() <= 60
+        && data.photoUrl is string && data.photoUrl.size() <= 2048
+        && data.photoPath is string && data.photoPath.size() <= 512
+        && data.notes is string && data.notes.size() <= 500
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
         && data.createdByUid is string && data.createdByUid.size() >= 1 && data.createdByUid.size() <= 128
@@ -160,10 +213,10 @@ service cloud.firestore {
     // Orders collection
     match /orders/{orderId} {
       allow get: if isValidId(orderId) && isVerified() && (
-        isBootstrappedAdmin() || (resource != null && request.auth.token.email in existing().teamEmails)
+        isBootstrappedAdmin() || (resource != null && request.auth.token.email.lower() in existing().teamEmails)
       );
       allow list: if isVerified() && (
-        isBootstrappedAdmin() || request.auth.token.email in resource.data.teamEmails
+        isBootstrappedAdmin() || request.auth.token.email.lower() in resource.data.teamEmails
       );
       allow create: if isValidId(orderId)
         && isVerified()
@@ -171,7 +224,7 @@ service cloud.firestore {
         && incoming().createdByUid == request.auth.uid
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
-        && request.auth.token.email in incoming().teamEmails
+        && request.auth.token.email.lower() in incoming().teamEmails
         && isTeamMember();
       allow update: if isValidId(orderId)
         && isVerified()
@@ -181,22 +234,69 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().createdByUid == existing().createdByUid
         && incoming().updatedAt == request.time
-        && (isBootstrappedAdmin() || request.auth.token.email in existing().teamEmails)
+        && (isBootstrappedAdmin() || request.auth.token.email.lower() in existing().teamEmails)
         && (
           // Action: Edit Order Details
           incoming().diff(existing()).affectedKeys().hasOnly([
             'customerName', 'phone', 'platform', 'socialContact', 'productName',
             'photos', 'photoPaths', 'size', 'color', 'notes',
             'productAmount', 'deliveryCharge', 'deliveryArea', 'paymentType',
-            'totalAmount', 'paidAmount', 'remainingAmount', 'status', 'updatedAt'
+            'totalAmount', 'paidAmount', 'remainingAmount', 'status',
+            'inventoryItemId', 'orderQuantity', 'stockDeducted', 'items', 'updatedAt'
           ]) ||
-          // Action: Quick Status Update
+          // Action: Quick Status Update (and automated stock sync across single/multi-piece items)
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'stockDeducted', 'items', 'updatedAt']) ||
+          // Action: Quick Status Update (single-item stock sync)
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'stockDeducted', 'updatedAt']) ||
+          // Action: Quick Mark Paid & Complete
+          incoming().diff(existing()).affectedKeys().hasOnly(['paidAmount', 'remainingAmount', 'status', 'stockDeducted', 'items', 'updatedAt']) ||
+          // Action: Quick Status Update (legacy single-field status)
           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) ||
           // Action: Team Access Sync (Admin only)
           (isBootstrappedAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['teamEmails', 'updatedAt']))
         );
       allow delete: if isValidId(orderId) && isVerified() && (
-        isBootstrappedAdmin() || request.auth.token.email in existing().teamEmails
+        isBootstrappedAdmin() || request.auth.token.email.lower() in existing().teamEmails
+      );
+    }
+
+    // Inventory collection
+    match /inventory/{itemId} {
+      allow get: if isValidId(itemId) && isVerified() && (
+        isBootstrappedAdmin() || (resource != null && request.auth.token.email.lower() in existing().teamEmails)
+      );
+      allow list: if isVerified() && (
+        isBootstrappedAdmin() || request.auth.token.email.lower() in resource.data.teamEmails
+      );
+      allow create: if isValidId(itemId)
+        && isVerified()
+        && isValidInventoryItem(incoming(), itemId)
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && request.auth.token.email.lower() in incoming().teamEmails
+        && isTeamMember();
+      allow update: if isValidId(itemId)
+        && isVerified()
+        && isValidInventoryItem(incoming(), itemId)
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().updatedAt == request.time
+        && (isBootstrappedAdmin() || request.auth.token.email.lower() in existing().teamEmails)
+        && (
+          // Action: Edit Inventory Item Details
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'pieceName', 'color', 'size', 'quantity', 'lowStockThreshold',
+            'unitPrice', 'photoUrl', 'photoPath', 'notes', 'updatedAt'
+          ]) ||
+          // Action: Quick Stock Adjustment (manual +/- or automated order sync)
+          incoming().diff(existing()).affectedKeys().hasOnly(['quantity', 'updatedAt']) ||
+          // Action: Team Access Sync (Admin only)
+          (isBootstrappedAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['teamEmails', 'updatedAt']))
+        );
+      allow delete: if isValidId(itemId) && isVerified() && (
+        isBootstrappedAdmin() || request.auth.token.email.lower() in existing().teamEmails
       );
     }
 
@@ -205,43 +305,43 @@ service cloud.firestore {
       allow get: if isValidId(photoId) && isVerified() && (
         isBootstrappedAdmin() ||
         isAuthorizedPartnerOnSettings() ||
-        (resource != null && request.auth.token.email in existing().teamEmails)
+        (resource != null && request.auth.token.email.lower() in existing().teamEmails)
       );
       allow list: if isVerified() && (
-        isBootstrappedAdmin() || request.auth.token.email in resource.data.teamEmails
+        isBootstrappedAdmin() || request.auth.token.email.lower() in resource.data.teamEmails
       );
       allow create: if isValidId(photoId)
         && isVerified()
         && isValidOrderPhoto(incoming(), photoId)
         && incoming().createdByUid == request.auth.uid
         && incoming().createdAt == request.time
-        && request.auth.token.email in incoming().teamEmails
+        && request.auth.token.email.lower() in incoming().teamEmails
         && isTeamMember();
       allow delete: if isValidId(photoId) && isVerified() && (
         isBootstrappedAdmin() ||
         isAuthorizedPartnerOnSettings() ||
-        (resource != null && request.auth.token.email in existing().teamEmails)
+        (resource != null && request.auth.token.email.lower() in existing().teamEmails)
       );
     }
 
     // Annual Order Number Counters
     match /counters/{yearId} {
       allow get: if isValidId(yearId) && isVerified() && (
-        isBootstrappedAdmin() || (resource != null && request.auth.token.email in existing().teamEmails)
+        isBootstrappedAdmin() || (resource != null && request.auth.token.email.lower() in existing().teamEmails)
       );
       allow create: if isValidId(yearId)
         && isVerified()
         && isValidCounter(incoming())
         && incoming().lastSequence == 1
         && incoming().updatedAt == request.time
-        && request.auth.token.email in incoming().teamEmails
+        && request.auth.token.email.lower() in incoming().teamEmails
         && isTeamMember();
       allow update: if isValidId(yearId)
         && isVerified()
         && isValidCounter(incoming())
         && incoming().year == existing().year
         && incoming().updatedAt == request.time
-        && (isBootstrappedAdmin() || request.auth.token.email in existing().teamEmails)
+        && (isBootstrappedAdmin() || request.auth.token.email.lower() in existing().teamEmails)
         && (
           (incoming().lastSequence == existing().lastSequence + 1 && incoming().diff(existing()).affectedKeys().hasOnly(['lastSequence', 'updatedAt'])) ||
           (isBootstrappedAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['teamEmails', 'updatedAt']))
@@ -251,7 +351,7 @@ service cloud.firestore {
     // Store Settings (settings/store)
     match /settings/{settingId} {
       allow get: if isValidId(settingId) && isVerified() && (
-        isBootstrappedAdmin() || (resource != null && request.auth.token.email in existing().partnerEmails)
+        isBootstrappedAdmin() || (resource != null && request.auth.token.email.lower() in existing().partnerEmails)
       );
       allow create: if isValidId(settingId)
         && settingId == 'store'

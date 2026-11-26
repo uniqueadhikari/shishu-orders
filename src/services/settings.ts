@@ -60,7 +60,8 @@ export async function saveStoreSettings(
     partnerEmails: string[];
   },
   user: User,
-  orders: Order[]
+  orders: Order[],
+  inventoryItems: { id: string; teamEmails: string[] }[] = []
 ): Promise<void> {
   if (!next.brandName.trim()) {
     throw new Error('Please enter a brand name.');
@@ -103,7 +104,7 @@ export async function saveStoreSettings(
     handleFirestoreError(error, OperationType.WRITE, 'settings/store');
   }
 
-  // Sync teamEmails across orders and active year counters so partner gets instant access
+  // Sync teamEmails across orders, inventory, and active year counters so partner gets instant access
   if (user.email?.toLowerCase() === OWNER_EMAIL) {
     const teamEmails = Array.from(new Set([OWNER_EMAIL, ...normalizedPartners])).slice(0, 5);
     try {
@@ -115,6 +116,15 @@ export async function saveStoreSettings(
           teamEmails.every((email) => order.teamEmails.includes(email));
         if (!same) {
           refsToUpdate.push(doc(db, 'orders', order.id));
+        }
+      }
+
+      for (const item of inventoryItems) {
+        const same =
+          item.teamEmails.length === teamEmails.length &&
+          teamEmails.every((email) => item.teamEmails.includes(email));
+        if (!same) {
+          refsToUpdate.push(doc(db, 'inventory', item.id));
         }
       }
 

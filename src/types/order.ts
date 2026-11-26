@@ -20,6 +20,43 @@ export type OrderStatus =
   | 'CANCELLED'
   | 'RETURNED';
 
+export interface InventoryItem {
+  id: string;
+  pieceName: string;
+  color: string;
+  size: string;
+  quantity: number;
+  lowStockThreshold: number;
+  unitPrice: string;
+  photoUrl: string;
+  photoPath: string;
+  notes: string;
+  createdAt: Date;
+  updatedAt: Date;
+  createdByUid: string;
+  teamEmails: string[];
+}
+
+export interface InventoryFormValues {
+  pieceName: string;
+  color: string;
+  size: string;
+  quantity: string;
+  lowStockThreshold: string;
+  unitPrice: string;
+  notes: string;
+}
+
+export interface OrderLineItem {
+  inventoryItemId: string;
+  productName: string;
+  color: string;
+  size: string;
+  quantity: number;
+  unitPrice: string;
+  stockDeducted: boolean;
+}
+
 export interface Order {
   id: string;
   orderNumber: string;
@@ -41,6 +78,10 @@ export interface Order {
   paidAmount: string | number;
   remainingAmount: string | number;
   status: OrderStatus;
+  inventoryItemId: string;
+  orderQuantity: number;
+  stockDeducted: boolean;
+  items: OrderLineItem[];
   createdAt: Date;
   updatedAt: Date;
   createdByUid: string;
@@ -51,14 +92,12 @@ export interface OrderFormValues {
   customerName: string;
   phone: string;
   socialContact: string;
-  productName: string;
-  size: string;
-  color: string;
   notes: string;
   totalAmount: string;
   paidAmount: string;
   remainingAmount: string;
   status: OrderStatus;
+  items: OrderLineItem[];
 }
 
 export interface PaymentCalculation {
@@ -100,4 +139,10 @@ export interface OrderFilters {
   color: string;
 }
 
-export type AppView = 'dashboard' | 'orders' | 'new-order' | 'reports' | 'settings';
+export type AppView =
+  | 'dashboard'
+  | 'orders'
+  | 'inventory'
+  | 'new-order'
+  | 'reports'
+  | 'settings';

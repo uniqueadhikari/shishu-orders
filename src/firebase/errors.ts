@@ -65,6 +65,9 @@ export function getUserFriendlyError(error: unknown, fallback = 'Something went 
   if (raw.includes('client is offline') || raw.includes('network-request-failed')) {
     return 'You appear to be offline. Please check your internet connection and try again.';
   }
+  if (raw.includes('aborted') || raw.includes('failed-precondition')) {
+    return 'Stock or order changed while saving. Please try again.';
+  }
   if (raw.includes('storage/unauthorized')) {
     return 'Photo upload denied. Ensure your Firebase Storage rules allow authorized Shishu.clo users.';
   }

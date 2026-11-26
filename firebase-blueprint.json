@@ -17,7 +17,7 @@
           "description": "Auto-generated sequential order number (e.g., SH-2026-0001)",
           "minLength": 12,
           "maxLength": 20,
-          "pattern": "^SH-[0-9]{4}-[0-9]{4}$"
+          "pattern": "^SH-[0-9]{4}-[0-9]{4,8}$"
         },
         "customerName": {
           "type": "string",
@@ -149,6 +149,24 @@
         "teamEmails": {
           "type": "array",
           "description": "Authorized team emails permitted to view and manage this order"
+        },
+        "inventoryItemId": {
+          "type": "string",
+          "description": "Optional primary linked inventory item document ID",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "orderQuantity": {
+          "type": "number",
+          "description": "Optional total piece quantity ordered across all items (defaults to 1)"
+        },
+        "stockDeducted": {
+          "type": "boolean",
+          "description": "Whether inventory stock has been automatically deducted for this order"
+        },
+        "items": {
+          "type": "array",
+          "description": "Optional list of up to 15 piece line items included in a multi-piece order"
         }
       },
       "required": [
@@ -319,12 +337,116 @@
         "updatedAt",
         "updatedByUid"
       ]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "Clothing stock item with piece name, color, size, quantity, and low-stock threshold",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Document ID matching Firestore inventory item ID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "pieceName": {
+          "type": "string",
+          "description": "Clothing piece or product name",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "color": {
+          "type": "string",
+          "description": "Color variant",
+          "minLength": 0,
+          "maxLength": 60
+        },
+        "size": {
+          "type": "string",
+          "description": "Optional garment size",
+          "minLength": 0,
+          "maxLength": 60
+        },
+        "quantity": {
+          "type": "number",
+          "description": "Current available stock count"
+        },
+        "lowStockThreshold": {
+          "type": "number",
+          "description": "Threshold at or below which low-stock alert triggers"
+        },
+        "unitPrice": {
+          "type": "string",
+          "description": "Optional default selling price text",
+          "minLength": 0,
+          "maxLength": 60
+        },
+        "photoUrl": {
+          "type": "string",
+          "description": "Optional reference photo URL or fsphoto reference",
+          "minLength": 0,
+          "maxLength": 2048
+        },
+        "photoPath": {
+          "type": "string",
+          "description": "Optional storage or orderPhotos cleanup path",
+          "minLength": 0,
+          "maxLength": 512
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional stock or fabric notes",
+          "minLength": 0,
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last-updated timestamp"
+        },
+        "createdByUid": {
+          "type": "string",
+          "description": "Creator Firebase UID",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "teamEmails": {
+          "type": "array",
+          "description": "Authorized team emails"
+        }
+      },
+      "required": [
+        "id",
+        "pieceName",
+        "color",
+        "size",
+        "quantity",
+        "lowStockThreshold",
+        "unitPrice",
+        "photoUrl",
+        "photoPath",
+        "notes",
+        "createdAt",
+        "updatedAt",
+        "createdByUid",
+        "teamEmails"
+      ]
     }
   },
   "firestore": {
     "/orders/{orderId}": {
       "schema": { "$ref": "#/entities/Order" },
       "description": "Primary collection storing all Shishu.clo customer orders"
+    },
+    "/inventory/{itemId}": {
+      "schema": { "$ref": "#/entities/InventoryItem" },
+      "description": "Inventory collection tracking Shishu.clo clothing pieces, colors, and live stock quantities"
     },
     "/orderPhotos/{photoId}": {
       "schema": { "$ref": "#/entities/OrderPhoto" },

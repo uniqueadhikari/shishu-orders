@@ -2,6 +2,7 @@ import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DashboardPage } from './components/DashboardPage';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { InventoryPage } from './components/InventoryPage';
 import { Layout } from './components/Layout';
 import { OrderDetailModal } from './components/OrderDetailModal';
 import { OrderForm } from './components/OrderForm';
@@ -12,9 +13,16 @@ import { SettingsPage } from './components/SettingsPage';
 import { ToastContainer, type ToastMessage } from './components/Toast';
 import { OWNER_EMAIL, auth } from './firebase/config';
 import { getUserFriendlyError } from './firebase/errors';
+import { getStockState, subscribeToInventory } from './services/inventory';
 import { subscribeToOrders } from './services/orders';
 import { subscribeToSettings } from './services/settings';
-import type { AppView, Order, OrderStatus, StoreSettings } from './types/order';
+import type {
+  AppView,
+  InventoryItem,
+  Order,
+  OrderStatus,
+  StoreSettings,
+} from './types/order';
 import { DEFAULT_STORE_SETTINGS } from './utils/payment';
 
 function AppShell() {
@@ -27,12 +35,15 @@ function AppShell() {
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [inventoryLoading, setInventoryLoading] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
 
   const [activeView, setActiveView] = useState<AppView>('dashboard');
   const [ordersInitialStatus, setOrdersInitialStatus] = useState<OrderStatus | 'ALL'>('ALL');
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [preselectedStockItem, setPreselectedStockItem] = useState<InventoryItem | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const addToast = useCallback((text: string, tone: 'success' | 'info' = 'success') => {
@@ -56,6 +67,8 @@ function AppShell() {
       if (!firebaseUser) {
         setOrders([]);
         setOrdersLoading(false);
+        setInventory([]);
+        setInventoryLoading(false);
         setSettingsLoaded(false);
       }
     });
@@ -120,7 +133,28 @@ function AppShell() {
       }
     );
 
-    return () => unsubOrders();
+    setInventoryLoading(true);
+    const unsubInventory = subscribeToInventory(
+      email,
+      (nextItems) => {
+        setInventory(nextItems);
+        setInventoryLoading(false);
+      },
+      (err) => {
+        setInventoryLoading(false);
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('Missing or insufficient permissions') || msg.includes('permission-denied')) {
+          setAccessDenied(true);
+        } else {
+          setDataError(getUserFriendlyError(err, 'Could not load inventory.'));
+        }
+      }
+    );
+
+    return () => {
+      unsubOrders();
+      unsubInventory();
+    };
   }, [authReady, user, settingsLoaded, accessDenied]);
 
   const selectedOrder = useMemo(
@@ -137,10 +171,16 @@ function AppShell() {
     [orders]
   );
 
+  const lowStockCount = useMemo(
+    () => inventory.filter((item) => getStockState(item) !== 'ok').length,
+    [inventory]
+  );
+
   async function handleSignOut() {
     await signOut(auth);
     setSelectedOrderId(null);
     setEditingOrder(null);
+    setPreselectedStockItem(null);
     setOrdersInitialStatus('ALL');
     setActiveView('dashboard');
   }
@@ -148,13 +188,15 @@ function AppShell() {
   function handleNavigate(view: AppView, statusFilter: OrderStatus | 'ALL' = 'ALL') {
     setSelectedOrderId(null);
     setEditingOrder(null);
+    setPreselectedStockItem(null);
     setOrdersInitialStatus(statusFilter);
     setActiveView(view);
   }
 
-  function handleOpenNewOrder() {
+  function handleOpenNewOrder(stockItem?: InventoryItem) {
     setSelectedOrderId(null);
     setEditingOrder(null);
+    setPreselectedStockItem(stockItem ?? null);
     setActiveView('new-order');
   }
 
@@ -189,10 +231,11 @@ function AppShell() {
     <Layout
       activeView={activeView}
       onNavigate={(view) => handleNavigate(view)}
-      onOpenNewOrder={handleOpenNewOrder}
+      onOpenNewOrder={() => handleOpenNewOrder()}
       userEmail={user.email ?? ''}
       brandName={settings.brandName}
       activeOrderCount={activeOrderCount}
+      lowStockCount={lowStockCount}
       onSignOut={handleSignOut}
     >
       {dataError && (
@@ -205,9 +248,12 @@ function AppShell() {
         <OrderForm
           mode="edit"
           initialOrder={editingOrder}
+          orders={orders}
+          inventory={inventory}
           settings={settings}
           user={user}
           onCancel={() => setEditingOrder(null)}
+          onInventoryCreated={(item) => addToast(`Added ${item.pieceName} to inventory`, 'info')}
           onSuccess={(updated) => {
             setEditingOrder(null);
             addToast(`Saved changes to ${updated?.orderNumber ?? 'order'}`);
@@ -216,32 +262,80 @@ function AppShell() {
       ) : selectedOrder ? (
         <OrderDetailModal
           order={selectedOrder}
+          inventory={inventory}
           settings={settings}
           onClose={() => setSelectedOrderId(null)}
           onEdit={(order) => setEditingOrder(order)}
-          onDeleted={() => {
-            const num = selectedOrder.orderNumber;
+          onOpenInventory={() => handleNavigate('inventory')}
+          onDeleted={(stockRestored, deletedOrderNumber) => {
+            const num = deletedOrderNumber || selectedOrder.orderNumber;
             setSelectedOrderId(null);
-            addToast(`Deleted ${num}`, 'info');
+            addToast(
+              stockRestored ? `Deleted ${num} · Stock restored` : `Deleted ${num}`,
+              'info'
+            );
           }}
           onNotify={(msg) => addToast(msg)}
         />
       ) : activeView === 'new-order' ? (
         <OrderForm
           mode="create"
+          orders={orders}
+          inventory={inventory}
+          preselectedInventoryItem={preselectedStockItem}
           settings={settings}
           user={user}
-          onCancel={() => setActiveView('dashboard')}
+          onCancel={() => {
+            setPreselectedStockItem(null);
+            setActiveView('dashboard');
+          }}
+          onInventoryCreated={(item) => addToast(`Added ${item.pieceName} to inventory`, 'info')}
           onSuccess={(created) => {
+            setPreselectedStockItem(null);
             if (created) {
               setOrdersInitialStatus('ALL');
               setActiveView('orders');
               setSelectedOrderId(created.id);
-              addToast(`Created order ${created.orderNumber}`);
+              const stockUpdatesCount =
+                'stockUpdates' in created && Array.isArray(created.stockUpdates)
+                  ? created.stockUpdates.length
+                  : 0;
+              const updatedQty =
+                'updatedStockQuantity' in created && typeof created.updatedStockQuantity === 'number'
+                  ? created.updatedStockQuantity
+                  : undefined;
+              const pieceLabel =
+                'stockPieceLabel' in created && created.stockPieceLabel
+                  ? `${created.stockPieceLabel} `
+                  : '';
+              addToast(
+                created.stockDeducted
+                  ? stockUpdatesCount > 1
+                    ? `Created ${created.orderNumber} · ${stockUpdatesCount} stock pieces updated`
+                    : `Created ${created.orderNumber} · ${pieceLabel}stock updated${
+                        typeof updatedQty === 'number' ? ` (${updatedQty} left)` : ''
+                      }`
+                  : `Created order ${created.orderNumber}`
+              );
             } else {
               setActiveView('orders');
             }
           }}
+        />
+      ) : activeView === 'inventory' ? (
+        <InventoryPage
+          items={inventory}
+          orders={orders}
+          loading={inventoryLoading}
+          settings={settings}
+          user={user}
+          onCreateOrderFromStock={(item) => handleOpenNewOrder(item)}
+          onSelectOrder={(order) => {
+            setOrdersInitialStatus('ALL');
+            setActiveView('orders');
+            setSelectedOrderId(order.id);
+          }}
+          onNotify={(msg) => addToast(msg)}
         />
       ) : activeView === 'orders' ? (
         <OrdersPage
@@ -249,13 +343,14 @@ function AppShell() {
           loading={ordersLoading}
           settings={settings}
           initialStatusFilter={ordersInitialStatus}
-          onNewOrder={handleOpenNewOrder}
+          onNewOrder={() => handleOpenNewOrder()}
           onSelectOrder={(order) => setSelectedOrderId(order.id)}
           onNotify={(msg) => addToast(msg)}
         />
       ) : activeView === 'reports' ? (
         <ReportsPage
           orders={orders}
+          inventory={inventory}
           settings={settings}
           onNotify={(msg) => addToast(msg)}
         />
@@ -263,6 +358,7 @@ function AppShell() {
         <SettingsPage
           settings={settings}
           orders={orders}
+          inventory={inventory}
           user={user}
           onSignOut={handleSignOut}
           onNotify={(msg) => addToast(msg)}
@@ -270,13 +366,16 @@ function AppShell() {
       ) : (
         <DashboardPage
           orders={orders}
+          inventory={inventory}
           loading={ordersLoading}
           settings={settings}
-          onNewOrder={handleOpenNewOrder}
+          onNewOrder={() => handleOpenNewOrder()}
+          onOrderFromStock={(item) => handleOpenNewOrder(item)}
           onSelectOrder={(order) => setSelectedOrderId(order.id)}
           onViewAllOrders={(statusFilter) =>
             handleNavigate('orders', statusFilter ?? 'ALL')
           }
+          onOpenInventory={() => handleNavigate('inventory')}
           onNotify={(msg) => addToast(msg)}
         />
       )}
